@@ -69,7 +69,7 @@ npx serve .
 
 ## Screenshots
 
-*(Screenshots go here — dark theme request builder with JSON tree response viewer)*
+![Ghost Client Screenshot](docs/screenshot.png)
 
 ---
 
