@@ -76,6 +76,8 @@ Zero dependencies. Zero backends. Zero trust required.
 
 **Auth that actually helps.** Bearer token, Basic auth, API key (header or query param). No digging through docs to remember the header format.
 
+**Settings that stay set.** 20+ configurable options: theme (light/dark/system), font size, sidebar width, JSON indent, history retention, timeout defaults, and more. All persist to localStorage.
+
 ---
 
 ## the toolbox
@@ -177,6 +179,7 @@ Your data is yours. Your tools should be too.
 - [x] JSON diff
 - [x] Collection runner
 - [x] Response search
+- [x] 20+ settings (appearance, requests, responses, history)
 - [ ] WebSocket support
 - [ ] Response assertions / mini test runner
 - [ ] Cookie jar visualization
