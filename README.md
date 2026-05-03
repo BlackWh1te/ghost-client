@@ -1,117 +1,174 @@
-# Ghost Client
+```
+                     .-.
+                    ("  )
+                     /|
+                    / |
+                   /  |
+              .-""-/   \-.         G H O S T   C L I E N T
+             /        oo  \\        a privacy-first api client
+            |    ___      o |       that lives in your browser
+            |   /   \      | |
+             \  | o |     / /
+              '-.___/.---' /
+                   |     |_
+                   |     __)         no telemetry. no cloud. no account.
+                   |       \
+                   |        |
+                   |_________|
 
-> A privacy-first, zero-backend API client that runs entirely in your browser.
+```
 
-[![Stars](https://img.shields.io/github/stars/BlackWh1te/ghost-client?style=social)](https://github.com/BlackWh1te/ghost-client)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-
-**No telemetry. No cloud. No account.** Your API keys, collections, and request history never leave your machine. Everything is stored locally via IndexedDB.
-
-[Live Demo](https://BlackWh1te.github.io/ghost-client) · [Features](#features) · [Screenshots](#screenshots)
-
----
-
-## Why Ghost Client?
-
-| Feature | Postman | Ghost Client |
-|---------|---------|--------------|
-| Cloud sync required | Yes | **No** |
-| Telemetry | Yes | **Zero** |
-| Works offline | No | **Yes** |
-| Open source | No | **Yes** |
-| Free forever | Partial | **Yes** |
-
----
-
-## Features
-
-### Core
-- **All HTTP methods** — GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
-- **Beautiful JSON tree viewer** — Collapsible, syntax-highlighted response viewer with search
-- **Collections** — Organize requests into folders, saved locally
-- **Collection Runner** — Run all requests in a collection with pass/fail summary
-- **Environment variables** — `{{baseUrl}}`, `{{apiKey}}` substitution across requests
-- **Request history** — Last 100 requests, one-click replay
-- **Custom timeout** — Per-request timeout control (1-300 seconds)
-- **Auth helpers** — Bearer token, Basic auth, API key (header or query)
-- **Light & Dark themes** — Toggle anytime
-- **100% client-side** — Deploys to GitHub Pages, Vercel, Netlify, or runs as a local file
-
-### Developer Tools (built-in)
-- **Code generator** — Instantly generate cURL, Fetch, Axios, or Python requests code
-- **cURL import** — Paste any `curl` command and convert it to a request
-- **JWT Decoder** — Inspect header, payload, and signature of any JWT token
-- **Base64 Encode/Decode** — Built-in converter
-- **URL Encode/Decode** — Built-in converter
-- **JSON Diff** — Compare two JSON objects side-by-side
-
-### Import / Export
-- Export your full workspace as JSON
-- Import from Postman collections
-- Import/restore your own backups
+<p align="center">
+  <a href="https://blackwh1te.github.io/ghost-client"><strong>try it live →</strong></a>
+</p>
 
 ---
 
-## Quick Start
+Most API clients treat your data like a product.
 
-### Use it now (no install)
+They sync your collections to their cloud. They phone home with telemetry. They lock basic features behind a login wall. They own your workspace even though *you* built it.
 
-Open `index.html` in any modern browser, or visit the live demo.
+**Ghost Client doesn't.**
 
-### Deploy to GitHub Pages
+It runs entirely in your browser. Your API keys stay on your machine. Your collections live in your IndexedDB. There is no server, no database, no analytics beacon, no "we've updated our privacy policy" email.
+
+Zero dependencies. Zero backends. Zero trust required.
+
+---
+
+## the fight card
+
+| | Postman / Insomnia | Ghost Client |
+|:---|:---|:---|
+| Cloud required | yes | **never** |
+| Telemetry | yes | **zero packets** |
+| Works offline | no | **always** |
+| Open source | no | **MIT** |
+| Free forever | partially | **completely** |
+| Bundle size | ~200MB installer | **~30KB** |
+| Account needed | yes | **no** |
+
+---
+
+## what it does
+
+```
+┌─ REQUEST BUILDER ───────────────────────────────┐
+│ GET ▼  https://api.github.com/users/BlackWh1te │
+│                                                  │
+│ [Params] [Headers] [Body] [Auth]                 │
+│                                                  │
+│ Authorization: Bearer {{github_token}}           │
+│                                                  │
+│              [  S E N D  ]                       │
+└──────────────────────────────────────────────────┘
+```
+
+**7 HTTP methods.** GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS. Each one gets a color so you can scan your history at a glance.
+
+**Collapsible JSON tree.** Not pretty-printed text. A real tree you can expand and collapse, with syntax highlighting that makes strings green, numbers red, and keys blue.
+
+**Environment variables.** Write `{{baseUrl}}` or `{{apiKey}}` anywhere. Switch environments and every request updates instantly. No find-and-replace.
+
+**Collections.** Save requests into named folders. Never lose that carefully crafted GraphQL mutation again.
+
+**History.** Every request you send is logged. One click replays it exactly. Last 100 only — this isn't a surveillance tool.
+
+**Auth that actually helps.** Bearer token, Basic auth, API key (header or query param). No digging through docs to remember the header format.
+
+---
+
+## the toolbox
+
+Ghost Client isn't just a request sender. It ships with utilities that developers actually open separate browser tabs for:
+
+| Tool | Use it when |
+|:---|:---|
+| **Code Generator** | You need to paste a working cURL, Fetch, Axios, or Python snippet into a PR |
+| **cURL Import** | Stack Overflow gives you a `curl` command and you need to break it into parts |
+| **JWT Decoder** | You're debugging auth and need to see the payload without leaving the app |
+| **Base64** | You're handling basic auth headers or image data URIs |
+| **URL Encode/Decode** | You're building query strings by hand |
+| **JSON Diff** | You have "before" and "after" API responses and need to see what changed |
+| **Collection Runner** | You want to smoke-test every endpoint without clicking 47 times |
+| **Response Search** | The API returns 4000 lines and you need one key |
+
+---
+
+## look at it
+
+![screenshot](docs/screenshot.png)
+
+*Dark mode. No distractions. Just you and the API.*
+
+---
+
+## use it right now
+
+No install. No signup. No build step.
+
+**Option 1:** Open [`index.html`](https://blackwh1te.github.io/ghost-client) in your browser.
+
+**Option 2:** One-line local server:
 
 ```bash
 git clone https://github.com/BlackWh1te/ghost-client.git
 cd ghost-client
-git push origin main
-# Then enable GitHub Pages in repo settings
+python -m http.server 8080
+# open http://localhost:8080
 ```
 
-### Run locally
-
-```bash
-# Just open the file — no build step, no server required
-open index.html
-
-# Or serve with any static server
-npx serve .
-```
+**Option 3:** Don't even clone it. Save the raw `index.html` to your desktop. Double-click it. It works.
 
 ---
 
-## Screenshots
+## who this is for
 
-![Ghost Client Screenshot](docs/screenshot.png)
+- Developers who are tired of logging into tools just to test an endpoint
+- People working with sensitive APIs who don't want their traffic routed through a third-party cloud
+- Anyone who believes their development environment should work on a plane
+- Teams who want a shared Postman collection without the Postman
 
----
+## who this is NOT for
 
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| UI | Vanilla HTML + CSS (no frameworks) |
-| Fonts | Inter + JetBrains Mono via Google Fonts |
-| Storage | IndexedDB (browser-native) |
-| Runtime | Any modern browser |
-
-**Bundle size:** ~30KB total. Zero dependencies. Zero build step.
+- People who want "team collaboration" with real-time cursors and chat bubbles
+- Enterprise buyers who need SSO and audit logs
+- Anyone who thinks "cloud-native" is a feature
 
 ---
 
-## Philosophy
+## the stack
+
+One HTML file. One CSS file. One JS file. That's the entire application.
+
+No React. No Vue. No build system. No `npm install`. No `node_modules` folder that takes 15 minutes to download and 3GB of disk. No webpack. No vite. No framework-of-the-month.
+
+Just the platform. The way the web was meant to work.
+
+| Layer | What |
+|:---|:---|
+| UI | Hand-written HTML + CSS |
+| Fonts | Inter + JetBrains Mono |
+| Storage | Browser IndexedDB |
+| Runtime | Any browser from the last 5 years |
+| Dependencies | **None** |
+| Size | **~30KB total** |
+
+---
+
+## philosophy
 
 > "The best API client is the one that doesn't spy on you."
 
-Ghost Client was built in response to a growing number of developer tools silently collecting telemetry, requiring cloud accounts, and locking features behind paywalls. We believe:
+This tool exists because the current state of developer tools is embarrassing. We've accepted that software we run locally needs accounts. That debugging an API requires internet access. That our request history is someone else's business intelligence.
 
-- Your API traffic is **private**
-- Your collections are **yours**
-- Your tools should work **offline**
-- Open source should mean **truly open**
+Ghost Client rejects all of that. It's a single-page application in the original sense: one page, one purpose, no surveillance.
+
+Your data is yours. Your tools should be too.
 
 ---
 
-## Roadmap
+## roadmap
 
 - [x] Code generator (cURL / Fetch / Axios / Python)
 - [x] cURL import
@@ -120,21 +177,24 @@ Ghost Client was built in response to a growing number of developer tools silent
 - [x] JSON diff
 - [x] Collection runner
 - [x] Response search
-- [ ] WebSocket testing
-- [ ] Request chaining / scripts
-- [ ] Response assertions
-- [ ] Cookie jar management
-- [ ] OAuth2 flow helper
+- [ ] WebSocket support
+- [ ] Response assertions / mini test runner
+- [ ] Cookie jar visualization
+- [ ] OAuth2 helper flow
 - [ ] HAR import/export
 
----
-
-## Contributing
-
-Issues and PRs welcome. This is intentionally a small, focused tool — we won't add a backend or cloud features.
+Want something else? Open an issue. But remember: the answer to "can it do cloud sync?" is **no**. Forever.
 
 ---
 
-## License
+## license
 
-MIT © [BlackWh1te](https://github.com/BlackWh1te)
+MIT — do whatever you want. Fork it. Rename it. Sell it. Embed it. The only requirement is keeping the license file intact.
+
+Created by **[BlackWh1te](https://github.com/BlackWh1te)** because the tools we use should respect us.
+
+---
+
+<p align="center">
+  <sub>if you found this useful, star the repo. if you didn't, don't.</sub>
+</p>
