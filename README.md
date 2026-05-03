@@ -25,18 +25,30 @@
 
 ## Features
 
+### Core
 - **All HTTP methods** — GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
-- **Beautiful JSON tree viewer** — Collapsible, syntax-highlighted response viewer
+- **Beautiful JSON tree viewer** — Collapsible, syntax-highlighted response viewer with search
 - **Collections** — Organize requests into folders, saved locally
+- **Collection Runner** — Run all requests in a collection with pass/fail summary
 - **Environment variables** — `{{baseUrl}}`, `{{apiKey}}` substitution across requests
 - **Request history** — Last 100 requests, one-click replay
+- **Custom timeout** — Per-request timeout control (1-300 seconds)
 - **Auth helpers** — Bearer token, Basic auth, API key (header or query)
-- **Import / Export**
-  - Export your full workspace as JSON
-  - Import from Postman collections
-  - Import/restore your own backups
 - **Light & Dark themes** — Toggle anytime
 - **100% client-side** — Deploys to GitHub Pages, Vercel, Netlify, or runs as a local file
+
+### Developer Tools (built-in)
+- **Code generator** — Instantly generate cURL, Fetch, Axios, or Python requests code
+- **cURL import** — Paste any `curl` command and convert it to a request
+- **JWT Decoder** — Inspect header, payload, and signature of any JWT token
+- **Base64 Encode/Decode** — Built-in converter
+- **URL Encode/Decode** — Built-in converter
+- **JSON Diff** — Compare two JSON objects side-by-side
+
+### Import / Export
+- Export your full workspace as JSON
+- Import from Postman collections
+- Import/restore your own backups
 
 ---
 
@@ -101,6 +113,13 @@ Ghost Client was built in response to a growing number of developer tools silent
 
 ## Roadmap
 
+- [x] Code generator (cURL / Fetch / Axios / Python)
+- [x] cURL import
+- [x] JWT decoder
+- [x] Base64 & URL utilities
+- [x] JSON diff
+- [x] Collection runner
+- [x] Response search
 - [ ] WebSocket testing
 - [ ] Request chaining / scripts
 - [ ] Response assertions

@@ -59,11 +59,13 @@
           <button class="sidebar-tab active" data-tab="collections">Collections</button>
           <button class="sidebar-tab" data-tab="history">History</button>
           <button class="sidebar-tab" data-tab="env">Environments</button>
+          <button class="sidebar-tab" data-tab="tools">Tools</button>
         </div>
 
         <div class="sidebar-panel active" id="panel-collections">
           <div class="panel-header">
             <button class="btn-small" id="newCollectionBtn">+ Collection</button>
+            <button class="btn-small" id="runCollectionBtn" title="Run all requests">▶ Run</button>
           </div>
           <div class="panel-body" id="collectionsList"></div>
         </div>
@@ -80,6 +82,53 @@
             <button class="btn-small" id="newEnvBtn">+ Environment</button>
           </div>
           <div class="panel-body" id="envList"></div>
+        </div>
+
+        <div class="sidebar-panel" id="panel-tools">
+          <div class="panel-header">
+            <span style="font-size:11px;font-weight:600;color:var(--text-tertiary)">Developer Utilities</span>
+          </div>
+          <div class="panel-body tool-panel">
+            <div class="tool-group">
+              <label class="tool-label">cURL Import</label>
+              <textarea id="curlImportInput" class="tool-textarea" placeholder="Paste curl command here..."></textarea>
+              <button class="btn-small" id="importCurlBtn" style="width:100%;margin-top:4px">Import cURL</button>
+            </div>
+            <div class="tool-group">
+              <label class="tool-label">JWT Decoder</label>
+              <textarea id="jwtInput" class="tool-textarea" placeholder="Paste JWT token here..."></textarea>
+              <div id="jwtOutput" class="tool-output"></div>
+            </div>
+            <div class="tool-group">
+              <label class="tool-label">Base64</label>
+              <div class="tool-row">
+                <textarea id="b64Input" class="tool-textarea" placeholder="Text to encode/decode..."></textarea>
+                <div class="tool-actions">
+                  <button class="btn-small" id="b64EncBtn">Encode</button>
+                  <button class="btn-small" id="b64DecBtn">Decode</button>
+                </div>
+              </div>
+              <div id="b64Output" class="tool-output"></div>
+            </div>
+            <div class="tool-group">
+              <label class="tool-label">URL Encode/Decode</label>
+              <div class="tool-row">
+                <textarea id="urlInput" class="tool-textarea" placeholder="Text to encode/decode..."></textarea>
+                <div class="tool-actions">
+                  <button class="btn-small" id="urlEncBtn">Encode</button>
+                  <button class="btn-small" id="urlDecBtn">Decode</button>
+                </div>
+              </div>
+              <div id="urlOutput" class="tool-output"></div>
+            </div>
+            <div class="tool-group">
+              <label class="tool-label">JSON Diff</label>
+              <textarea id="jsonDiffA" class="tool-textarea" placeholder="Original JSON..."></textarea>
+              <textarea id="jsonDiffB" class="tool-textarea" placeholder="Modified JSON..."></textarea>
+              <button class="btn-small" id="jsonDiffBtn" style="width:100%;margin-top:4px">Compare</button>
+              <div id="jsonDiffOutput" class="tool-output"></div>
+            </div>
+          </div>
         </div>
       </aside>
 
@@ -98,11 +147,16 @@
               <option value="OPTIONS">OPTIONS</option>
             </select>
             <input type="text" id="requestUrl" class="url-input" placeholder="https://api.example.com/users" value="https://httpbin.org/get">
+            <div class="timeout-wrap">
+              <input type="number" id="timeoutInput" class="timeout-input" value="30" min="1" max="300" title="Timeout (seconds)">
+              <span class="timeout-label">s</span>
+            </div>
             <button class="btn-primary" id="sendBtn">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
               Send
             </button>
             <button class="btn-secondary" id="saveBtn">Save</button>
+            <button class="btn-secondary" id="genCodeBtn" title="Generate code">&lt;/&gt;</button>
           </div>
 
           <div class="request-tabs">
@@ -187,6 +241,8 @@
               </select>
               <button class="btn-small" id="copyResponseBtn">Copy</button>
               <button class="btn-small" id="downloadResponseBtn">Download</button>
+              <div class="toolbar-spacer"></div>
+              <input type="text" id="resSearch" class="search-input" placeholder="Search response...">
             </div>
             <pre id="responseBody" class="response-body"><code class="language-json">// Send a request to see the response</code></pre>
           </div>

@@ -320,7 +320,8 @@
 
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const timeoutMs = Math.max(1000, parseInt($('#timeoutInput').value || '30', 10) * 1000);
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
       const response = await fetch(finalUrl, {
         method,
@@ -907,6 +908,214 @@
       }
     });
 
+    // ===== New Feature Event Listeners =====
+    on($('#genCodeBtn'), 'click', () => {
+      const method = $('#httpMethod').value;
+      const url = $('#requestUrl').value.trim();
+      const headers = getKvData($('#headersList'));
+      const body = $('#bodyType').value !== 'none' ? $('#bodyEditor').value.trim() : null;
+      const authType = $('#authType').value;
+
+      const modalBody = document.createElement('div');
+      const tabs = document.createElement('div');
+      tabs.className = 'code-gen-tabs';
+      const langs = ['cURL', 'Fetch', 'Axios', 'Python'];
+      let activeLang = 'cURL';
+      const bodies = {};
+
+      function buildCode(lang) {
+        if (lang === 'cURL') {
+          let cmd = `curl -X ${method} "${url}"`;
+          Object.entries(headers).forEach(([k, v]) => { cmd += `\\n  -H "${k}: ${v}"`; });
+          if (body && method !== 'GET' && method !== 'HEAD') cmd += `\\n  -d '${body.replace(/'/g, "'\\''")}'`;
+          return cmd;
+        }
+        if (lang === 'Fetch') {
+          let code = `fetch("${url}", {\\n  method: "${method}",`;
+          if (Object.keys(headers).length) code += `\\n  headers: ${JSON.stringify(headers, null, 2).replace(/\n/g, '\\n')},`;
+          if (body && method !== 'GET' && method !== 'HEAD') code += `\\n  body: JSON.stringify(${body}),`;
+          code += `\\n})\\n  .then(r => r.json())\\n  .then(data => console.log(data))\\n  .catch(err => console.error(err));`;
+          return code;
+        }
+        if (lang === 'Axios') {
+          let code = `axios.${method.toLowerCase()}("${url}"`;
+          if (body && method !== 'GET' && method !== 'HEAD') code += `, ${body}`;
+          if (Object.keys(headers).length) {
+            code += `, {\\n  headers: ${JSON.stringify(headers, null, 2).replace(/\n/g, '\\n')}`;
+            if (authType === 'bearer') code += `\\n    Authorization: 'Bearer YOUR_TOKEN'`;
+            code += `\\n}`;
+          }
+          code += `)\\n  .then(r => console.log(r.data))\\n  .catch(err => console.error(err));`;
+          return code;
+        }
+        if (lang === 'Python') {
+          let code = `import requests\\n\\nresponse = requests.${method.toLowerCase()}("${url}"`;
+          const opts = [];
+          if (Object.keys(headers).length) opts.push(`headers=${JSON.stringify(headers)}`);
+          if (body && method !== 'GET' && method !== 'HEAD') opts.push(`json=${body}`);
+          if (opts.length) code += `, ${opts.join(', ')}`;
+          code += `)\\nprint(response.status_code)\\nprint(response.json())`;
+          return code;
+        }
+        return '';
+      }
+
+      langs.forEach(l => {
+        const btn = document.createElement('button');
+        btn.className = 'code-gen-tab' + (l === activeLang ? ' active' : '');
+        btn.textContent = l;
+        on(btn, 'click', () => {
+          activeLang = l;
+          tabs.querySelectorAll('.code-gen-tab').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          displayCode(buildCode(l));
+        });
+        tabs.appendChild(btn);
+      });
+
+      const display = document.createElement('pre');
+      display.className = 'code-gen-body';
+      function displayCode(code) { display.textContent = code; }
+      displayCode(buildCode(activeLang));
+
+      const copyBtn = document.createElement('button');
+      copyBtn.className = 'btn-small';
+      copyBtn.textContent = 'Copy';
+      copyBtn.style.marginTop = '8px';
+      on(copyBtn, 'click', () => {
+        navigator.clipboard.writeText(display.textContent).then(() => toast('Code copied', 'success'));
+      });
+
+      modalBody.appendChild(tabs);
+      modalBody.appendChild(display);
+      modalBody.appendChild(copyBtn);
+      showModal('Generate Code', modalBody);
+    });
+
+    on($('#importCurlBtn'), 'click', () => {
+      const text = $('#curlImportInput').value.trim();
+      if (!text) return;
+      const parsed = parseCurl(text);
+      if (parsed) {
+        $('#httpMethod').value = parsed.method;
+        $('#requestUrl').value = parsed.url;
+        if (parsed.headers) setKvData($('#headersList'), parsed.headers);
+        if (parsed.body) {
+          $('#bodyType').value = 'raw';
+          $('#bodyEditor').value = parsed.body;
+        }
+        toast('cURL imported', 'success');
+        $('#curlImportInput').value = '';
+      } else {
+        toast('Could not parse cURL command', 'error');
+      }
+    });
+
+    on($('#jwtInput'), 'input', () => {
+      const token = $('#jwtInput').value.trim();
+      if (!token) { $('#jwtOutput').innerHTML = ''; return; }
+      try {
+        const parts = token.split('.');
+        if (parts.length !== 3) throw new Error('Invalid JWT');
+        const header = JSON.parse(atob(parts[0].replace(/-/g, '+').replace(/_/g, '/')));
+        const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
+        $('#jwtOutput').innerHTML = `<div class="jwt-header">Header:\\n${JSON.stringify(header, null, 2)}</div>\\n<div class="jwt-payload">Payload:\\n${JSON.stringify(payload, null, 2)}</div>\\n<div class="jwt-sig">Signature: ${parts[2].slice(0, 16)}...</div>`;
+      } catch (e) {
+        $('#jwtOutput').textContent = 'Invalid JWT token';
+      }
+    });
+
+    on($('#b64EncBtn'), 'click', () => {
+      try { $('#b64Output').textContent = btoa($('#b64Input').value); } catch { $('#b64Output').textContent = 'Error: contains non-ASCII'; }
+    });
+    on($('#b64DecBtn'), 'click', () => {
+      try { $('#b64Output').textContent = atob($('#b64Input').value); } catch { $('#b64Output').textContent = 'Invalid Base64'; }
+    });
+
+    on($('#urlEncBtn'), 'click', () => {
+      $('#urlOutput').textContent = encodeURIComponent($('#urlInput').value);
+    });
+    on($('#urlDecBtn'), 'click', () => {
+      try { $('#urlOutput').textContent = decodeURIComponent($('#urlInput').value); } catch { $('#urlOutput').textContent = 'Invalid URL encoding'; }
+    });
+
+    on($('#jsonDiffBtn'), 'click', () => {
+      try {
+        const a = JSON.parse($('#jsonDiffA').value || '{}');
+        const b = JSON.parse($('#jsonDiffB').value || '{}');
+        $('#jsonDiffOutput').innerHTML = renderDiff(a, b);
+      } catch (e) {
+        $('#jsonDiffOutput').textContent = 'Invalid JSON: ' + e.message;
+      }
+    });
+
+    on($('#runCollectionBtn'), 'click', async () => {
+      const collections = await dbGet('collections');
+      if (!collections.length) { toast('No collections to run', 'info'); return; }
+      const allReqs = await dbGet('requests');
+
+      const modalBody = document.createElement('div');
+      modalBody.style.maxHeight = '400px';
+      modalBody.style.overflow = 'auto';
+
+      const resultsDiv = document.createElement('div');
+      resultsDiv.innerHTML = '<div style="color:var(--text-tertiary);margin-bottom:8px">Running collection...</div>';
+      modalBody.appendChild(resultsDiv);
+
+      showModal('Collection Runner', modalBody, null, null);
+
+      let passCount = 0, failCount = 0;
+      const total = allReqs.length;
+
+      for (const req of allReqs) {
+        try {
+          const start = performance.now();
+          const headers = req.headers || {};
+          const body = req.body && req.bodyType !== 'none' ? req.body : null;
+          const cRunner = new AbortController();
+          const tRunner = setTimeout(() => cRunner.abort(), 10000);
+          const resp = await fetch(req.url, { method: req.method, headers, body, signal: cRunner.signal });
+          clearTimeout(tRunner);
+          const time = Math.round(performance.now() - start);
+          const status = resp.status;
+          const ok = status < 400;
+          if (ok) passCount++; else failCount++;
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;';
+          row.innerHTML = `<span class="hist-method ${req.method.toLowerCase()}" style="flex-shrink:0">${req.method}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)}</span><span style="color:${ok ? 'var(--accent-green)' : 'var(--accent-red)'};font-weight:600">${status}</span><span style="color:var(--text-muted);flex-shrink:0">${time}ms</span>`;
+          resultsDiv.appendChild(row);
+        } catch (err) {
+          failCount++;
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;';
+          row.innerHTML = `<span class="hist-method ${req.method.toLowerCase()}" style="flex-shrink:0">${req.method}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)}</span><span style="color:var(--accent-red);font-weight:600">ERR</span>`;
+          resultsDiv.appendChild(row);
+        }
+      }
+
+      const summary = document.createElement('div');
+      summary.style.cssText = 'margin-top:10px;padding-top:10px;border-top:2px solid var(--border-default);font-size:13px;font-weight:600;';
+      summary.innerHTML = `<span style="color:var(--accent-green)">${passCount} passed</span> · <span style="color:var(--accent-red)">${failCount} failed</span> · ${total} total`;
+      resultsDiv.appendChild(summary);
+    });
+
+    on($('#resSearch'), 'input', () => {
+      const term = $('#resSearch').value.trim().toLowerCase();
+      if (!window._lastResponse || !term) {
+        if (window._lastResponse) {
+          const fmt = $('#resFormat').value;
+          const text = window._lastResponse.text;
+          if (fmt === 'raw') $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`;
+          else { try { $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(text)) + '</div>'; } catch { $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`; } }
+        }
+        return;
+      }
+      const text = window._lastResponse.text;
+      const lines = text.split('\n');
+      const filtered = lines.filter(l => l.toLowerCase().includes(term));
+      $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(filtered.join('\n') || '// No matches')}</code>`;
+    });
+
     // Init auth fields
     renderAuthFields();
 
@@ -916,6 +1125,47 @@
     await renderEnvironments();
 
     toast('Ghost Client ready — 100% offline', 'success');
+  }
+
+  // ===== Utility Functions =====
+  function parseCurl(cmd) {
+    const methodMatch = cmd.match(/-X\s+(\w+)/i) || cmd.match(/--request\s+(\w+)/i);
+    const method = methodMatch ? methodMatch[1].toUpperCase() : 'GET';
+    const urlMatch = cmd.match(/curl\s+(?:-[^\s]+\s+)*["']?([^"'\s]+)/);
+    if (!urlMatch) return null;
+    const url = urlMatch[1].replace(/^['"]|['"]$/g, '');
+    const headers = {};
+    const headerRegex = /-H\s+["']([^"']+)["']/g;
+    let m;
+    while ((m = headerRegex.exec(cmd)) !== null) {
+      const parts = m[1].split(':');
+      if (parts.length >= 2) headers[parts[0].trim()] = parts.slice(1).join(':').trim();
+    }
+    const dataMatch = cmd.match(/-d\s+["']([^"']+)["']/) || cmd.match(/--data\s+["']([^"']+)["']/) || cmd.match(/-d\s+(\{[^}]+\})/);
+    const body = dataMatch ? dataMatch[1] : null;
+    return { method, url, headers, body };
+  }
+
+  function renderDiff(a, b, path = '') {
+    if (typeof a !== typeof b || (a === null) !== (b === null)) {
+      return `<div class="diff-key">${path || 'root'}</div><div class="diff-del">${JSON.stringify(a)}</div><div class="diff-add">${JSON.stringify(b)}</div>`;
+    }
+    if (a === null || typeof a !== 'object') {
+      if (a === b) return `<div class="diff-same">${path ? path + ': ' : ''}${JSON.stringify(a)}</div>`;
+      return `<div class="diff-key">${path || 'root'}</div><div class="diff-del">${JSON.stringify(a)}</div><div class="diff-add">${JSON.stringify(b)}</div>`;
+    }
+    if (Array.isArray(a) !== Array.isArray(b)) {
+      return `<div class="diff-key">${path || 'root'}</div><div class="diff-del">${JSON.stringify(a)}</div><div class="diff-add">${JSON.stringify(b)}</div>`;
+    }
+    let html = '';
+    const allKeys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+    allKeys.forEach(k => {
+      const newPath = path ? `${path}.${k}` : k;
+      if (!(k in a)) html += `<div class="diff-key">${newPath}</div><div class="diff-add">${JSON.stringify(b[k])}</div>`;
+      else if (!(k in b)) html += `<div class="diff-key">${newPath}</div><div class="diff-del">${JSON.stringify(a[k])}</div>`;
+      else html += renderDiff(a[k], b[k], newPath);
+    });
+    return html;
   }
 
   init().catch(err => {
