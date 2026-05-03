@@ -19,7 +19,7 @@
 ```
 
 <p align="center">
-  <a href="https://blackwh1te.github.io/ghost-client"><strong>try it live →</strong></a>
+  <a href="https://ghost-client-mocha.vercel.app"><strong>try it live →</strong></a>
 </p>
 
 ---
@@ -114,7 +114,7 @@ Ghost Client isn't just a request sender. It ships with utilities that developer
 
 No install. No signup. No build step.
 
-**Option 1:** Open [`index.html`](https://blackwh1te.github.io/ghost-client) in your browser.
+**Option 1:** Open [ghost-client-mocha.vercel.app](https://ghost-client-mocha.vercel.app) in your browser.
 
 **Option 2:** One-line local server:
 
