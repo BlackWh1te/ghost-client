@@ -404,7 +404,11 @@
         try { formatted = JSON.stringify(JSON.parse(responseText), null, indent); } catch {}
       }
 
-      $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(responseText), localStorage.getItem('gc-auto-expand') === 'true') + '</div>';
+      try {
+        $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(responseText), localStorage.getItem('gc-auto-expand') === 'true') + '</div>';
+      } catch {
+        $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(responseText)}</code>`;
+      }
       window._lastResponse = { text: responseText, headers: resHeaders, status: code, statusText: response.statusText, time: elapsed, size };
 
       // Save to history
@@ -610,26 +614,31 @@
     $('#requestUrl').value = item.url;
     setKvData($('#headersList'), item.headers || {});
     setKvData($('#paramsList'), item.params || {});
-    $('#bodyType').value = item.bodyType || 'none';
-
-    // Handle body restoration
-    if (item.bodyType === 'graphql' && item.body && typeof item.body === 'object') {
-      $('#graphqlQuery').value = item.body.query || '';
-      $('#graphqlVariables').value = item.body.variables || '{}';
-      // Trigger body type change to show GraphQL editor
-      $('#bodyType').dispatchEvent(new Event('change'));
-    } else {
-      $('#bodyEditor').value = item.body || '';
-      // Ensure regular editor is shown
-      if (item.bodyType === 'graphql') {
-        $('#bodyType').value = 'json'; // Fallback to JSON if data is malformed
-      }
-    }
-
+    restoreRequestBody(item);
     setAuthConfig(item.authConfig || { type: 'none' });
   }
 
   function truncate(s, n) { return s.length > n ? s.slice(0, n) + '...' : s; }
+
+  function restoreRequestBody(item) {
+    $('#bodyType').value = item.bodyType || 'none';
+
+    // Handle body restoration
+    if (item.bodyType === 'graphql') {
+      if (item.body && typeof item.body === 'object') {
+        $('#graphqlQuery').value = item.body.query || '';
+        $('#graphqlVariables').value = item.body.variables || '{}';
+      } else {
+        $('#graphqlQuery').value = '';
+        $('#graphqlVariables').value = '{}';
+      }
+      // Trigger body type change to show GraphQL editor
+      $('#bodyType').dispatchEvent(new Event('change'));
+    } else {
+      $('#bodyEditor').value = item.body || '';
+    }
+  }
+
   function formatTime(ts, format = 'relative') {
     const d = new Date(ts);
     if (format === 'absolute') return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
@@ -749,22 +758,7 @@
     $('#requestUrl').value = req.url;
     setKvData($('#headersList'), req.headers || {});
     setKvData($('#paramsList'), req.params || {});
-    $('#bodyType').value = req.bodyType || 'none';
-
-    // Handle body restoration
-    if (req.bodyType === 'graphql' && req.body && typeof req.body === 'object') {
-      $('#graphqlQuery').value = req.body.query || '';
-      $('#graphqlVariables').value = req.body.variables || '{}';
-      // Trigger body type change to show GraphQL editor
-      $('#bodyType').dispatchEvent(new Event('change'));
-    } else {
-      $('#bodyEditor').value = req.body || '';
-      // Ensure regular editor is shown
-      if (req.bodyType === 'graphql') {
-        $('#bodyType').value = 'json'; // Fallback to JSON if data is malformed
-      }
-    }
-
+    restoreRequestBody(req);
     setAuthConfig(req.authConfig || { type: 'none' });
   }
 
@@ -1110,6 +1104,7 @@
                 <select id="settingsDefaultBody" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
                   <option value="none">None</option>
                   <option value="json">JSON</option>
+                  <option value="graphql">GraphQL</option>
                   <option value="form">Form Data</option>
                   <option value="text">Plain Text</option>
                 </select>
@@ -1531,8 +1526,11 @@
         if (autoFmt) {
           try { text = JSON.stringify(JSON.parse(text), null, parseInt(localStorage.getItem('gc-json-indent') || '2', 10)); } catch {}
         }
-        try { $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(text), localStorage.getItem('gc-auto-expand') === 'true') + '</div>'; }
-        catch { $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`; }
+        try {
+          $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(text), localStorage.getItem('gc-auto-expand') === 'true') + '</div>';
+        } catch {
+          $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`;
+        }
       }
     });
 
@@ -1547,7 +1545,11 @@
         const query = $('#graphqlQuery').value.trim();
         const variables = $('#graphqlVariables').value.trim();
         if (query) {
-          body = JSON.stringify({ query, variables: variables ? JSON.parse(variables) : {} });
+          try {
+            body = JSON.stringify({ query, variables: variables ? JSON.parse(variables) : {} });
+          } catch {
+            body = JSON.stringify({ query, variables: {} });
+          }
         }
       } else if (bodyType !== 'none') {
         body = $('#bodyEditor').value.trim();
@@ -1709,7 +1711,15 @@
         try {
           const start = performance.now();
           const headers = req.headers || {};
-          const body = req.body && req.bodyType !== 'none' ? req.body : null;
+          let body = null;
+          if (req.body && req.bodyType !== 'none') {
+            if (req.bodyType === 'graphql' && typeof req.body === 'object') {
+              const variables = req.body.variables ? JSON.parse(req.body.variables) : {};
+              body = JSON.stringify({ query: req.body.query, variables });
+            } else {
+              body = req.body;
+            }
+          }
           const cRunner = new AbortController();
           const tRunner = setTimeout(() => cRunner.abort(), 10000);
           const resp = await fetch(req.url, { method: req.method, headers, body, signal: cRunner.signal });
@@ -1744,7 +1754,13 @@
           const fmt = $('#resFormat').value;
           const text = window._lastResponse.text;
           if (fmt === 'raw') $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`;
-          else { try { $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(text)) + '</div>'; } catch { $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`; } }
+          else {
+            try {
+              $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(text)) + '</div>';
+            } catch {
+              $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`;
+            }
+          }
         }
         return;
       }
