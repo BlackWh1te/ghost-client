@@ -73,6 +73,7 @@
         <div class="sidebar-panel" id="panel-history">
           <div class="panel-header">
             <button class="btn-small btn-danger" id="clearHistoryBtn">Clear</button>
+          <input type="text" id="historyFilter" class="filter-input" placeholder="Filter history..." style="margin-left:auto;padding:4px 8px;font-size:11px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;width:140px;">
           </div>
           <div class="panel-body" id="historyList"></div>
         </div>
@@ -252,9 +253,15 @@
                 <option value="preview">Preview</option>
               </select>
               <button class="btn-small" id="copyResponseBtn">Copy</button>
+              <button class="btn-small" id="copyCurlBtn" title="Copy as cURL">cURL</button>
               <button class="btn-small" id="downloadResponseBtn">Download</button>
               <div class="toolbar-spacer"></div>
               <input type="text" id="resSearch" class="search-input" placeholder="Search response...">
+              <select id="searchOptions" class="search-options" style="padding:4px 8px;font-size:11px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;">
+                <option value="ci">Case Insensitive</option>
+                <option value="cs">Case Sensitive</option>
+                <option value="regex">Regex</option>
+              </select>
             </div>
             <pre id="responseBody" class="response-body"><code class="language-json">// Send a request to see the response</code></pre>
           </div>

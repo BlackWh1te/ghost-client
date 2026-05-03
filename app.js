@@ -132,12 +132,12 @@
   }
 
   // ===== JSON Tree Renderer =====
-  function renderJsonTree(obj, autoExpand = false, level = 0) {
+  function renderJsonTree(obj, autoExpand = false, level = 0, searchTerm = '', searchMode = 'ci') {
     if (obj === null) return '<span class="null">null</span>';
     const type = typeof obj;
-    if (type === 'string') return `<span class="string">"${escapeHtml(obj)}"</span>`;
-    if (type === 'number') return `<span class="number">${obj}</span>`;
-    if (type === 'boolean') return `<span class="boolean">${obj}</span>`;
+    if (type === 'string') return `<span class="string">"${highlightText(escapeHtml(obj), searchTerm, searchMode)}"</span>`;
+    if (type === 'number') return `<span class="number">${highlightText(obj.toString(), searchTerm, searchMode)}</span>`;
+    if (type === 'boolean') return `<span class="boolean">${highlightText(obj.toString(), searchTerm, searchMode)}</span>`;
 
     if (Array.isArray(obj)) {
       if (obj.length === 0) return '<span class="boolean">[]</span>';
@@ -145,7 +145,7 @@
       const cls = autoExpand ? 'expanded' : 'collapsed';
       let html = `<span class="${cls}" id="${id}"><span class="toggle" onclick="toggleJson('${id}')"></span><span class="boolean">[</span><span class="collapsible">`;
       obj.forEach((item, i) => {
-        html += `<div class="indent">${renderJsonTree(item, autoExpand, level + 1)}${i < obj.length - 1 ? '<span class="text-tertiary">,</span>' : ''}</div>`;
+        html += `<div class="indent">${renderJsonTree(item, autoExpand, level + 1, searchTerm, searchMode)}${i < obj.length - 1 ? '<span class="text-tertiary">,</span>' : ''}</div>`;
       });
       html += `</span><span class="boolean">]</span></span>`;
       return html;
@@ -157,10 +157,31 @@
     const cls = autoExpand ? 'expanded' : 'collapsed';
     let html = `<span class="${cls}" id="${id}"><span class="toggle" onclick="toggleJson('${id}')"></span><span class="boolean">{</span><span class="collapsible">`;
     keys.forEach((key, i) => {
-      html += `<div class="indent"><span class="key">"${escapeHtml(key)}"</span><span class="text-tertiary">: </span>${renderJsonTree(obj[key], autoExpand, level + 1)}${i < keys.length - 1 ? '<span class="text-tertiary">,</span>' : ''}</div>`;
+      html += `<div class="indent"><span class="key">"${highlightText(escapeHtml(key), searchTerm, searchMode)}"</span><span class="text-tertiary">: </span>${renderJsonTree(obj[key], autoExpand, level + 1, searchTerm, searchMode)}${i < keys.length - 1 ? '<span class="text-tertiary">,</span>' : ''}</div>`;
     });
     html += `</span><span class="boolean">}</span></span>`;
     return html;
+  }
+
+  function highlightText(text, term, mode = 'ci') {
+    if (!term || !text) return text;
+    let regex;
+    if (mode === 'regex') {
+      try {
+        regex = new RegExp(`(${term})`, 'gi');
+      } catch {
+        regex = new RegExp(`(${escapeRegex(term)})`, 'gi');
+      }
+    } else if (mode === 'cs') {
+      regex = new RegExp(`(${escapeRegex(term)})`, 'g');
+    } else {
+      regex = new RegExp(`(${escapeRegex(term)})`, 'gi');
+    }
+    return text.replace(regex, '<mark class="search-highlight">$1</mark>');
+  }
+
+  function escapeRegex(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   window.toggleJson = function(id) {
@@ -405,7 +426,9 @@
       }
 
       try {
-        $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(responseText), localStorage.getItem('gc-auto-expand') === 'true') + '</div>';
+        const searchTerm = $('#resSearch').value.trim();
+        const searchMode = $('#searchOptions') ? $('#searchOptions').value : 'ci';
+        $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(responseText), localStorage.getItem('gc-auto-expand') === 'true', 0, searchTerm, searchMode) + '</div>';
       } catch {
         $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(responseText)}</code>`;
       }
@@ -456,11 +479,22 @@
         } catch {}
       }
     } catch (err) {
-      $('#statusCode').textContent = 'ERR';
+      const isTimeout = err.name === 'AbortError';
+      const errorMsg = isTimeout ? 'Request timeout' : err.message;
+      $('#statusCode').textContent = isTimeout ? 'TIME' : 'ERR';
       $('#statusCode').className = 'status-code error';
-      $('#statusText').textContent = err.name === 'AbortError' ? 'Request timeout' : err.message;
-      $('#responseBody').innerHTML = `<code class="language-json" style="color:var(--accent-red)">Error: ${escapeHtml(err.message)}</code>`;
-      toast(err.message, 'error');
+      $('#statusText').textContent = errorMsg;
+      $('#responseBody').innerHTML = `
+        <div style="padding:16px;font-family:var(--font-sans)">
+          <div style="color:var(--accent-red);font-weight:600;margin-bottom:8px">Request Failed</div>
+          <div style="color:var(--text-secondary);font-size:12px;margin-bottom:16px">${escapeHtml(errorMsg)}</div>
+          <button class="btn-small" id="retryBtn" style="display:inline-flex;align-items:center;gap:4px">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/></svg>
+            Retry Request
+          </button>
+        </div>`;
+      on($('#retryBtn'), 'click', () => sendRequest());
+      toast(errorMsg, 'error');
     } finally {
       $('#sendBtn').innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg> Send`;
       $('#sendBtn').disabled = false;
@@ -590,9 +624,20 @@
     const sortBy = localStorage.getItem('gc-history-sort') || 'time';
     if (sortBy === 'name') items.sort((a, b) => a.url.localeCompare(b.url));
     else items.sort((a, b) => b.timestamp - a.timestamp);
+    
+    // Apply filter
+    const filter = $('#historyFilter').value.trim().toLowerCase();
+    if (filter) {
+      items = items.filter(item => 
+        item.method.toLowerCase().includes(filter) ||
+        item.url.toLowerCase().includes(filter) ||
+        (item.status && item.status.toString().includes(filter))
+      );
+    }
+    
     container.innerHTML = '';
     if (items.length === 0) {
-      container.innerHTML = '<div class="empty-state"><div>Send your first request to see history here</div></div>';
+      container.innerHTML = '<div class="empty-state"><div>' + (filter ? 'No matching history items' : 'Send your first request to see history here') + '</div></div>';
       return;
     }
     const tsFormat = localStorage.getItem('gc-timestamps') || 'relative';
@@ -695,12 +740,71 @@
       collReqs.forEach(req => {
         const r = document.createElement('div');
         r.className = 'coll-req-item' + (currentRequestId === req.id ? ' active' : '');
-        r.innerHTML = `<span class="hist-method ${req.method.toLowerCase()}">${req.method}</span><span>${escapeHtml(req.name)}</span>`;
-        on(r, 'click', () => {
+        r.innerHTML = `
+          <span class="hist-method ${req.method.toLowerCase()}">${req.method}</span>
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)}</span>
+          <span class="coll-req-actions" style="display:none;gap:4px">
+            <button class="coll-action-btn" data-action="dup" title="Duplicate">⧉</button>
+            <button class="coll-action-btn" data-action="ren" title="Rename">✎</button>
+            <button class="coll-action-btn" data-action="del" title="Delete">×</button>
+          </span>
+        `;
+
+        // Show/hide actions on hover
+        r.addEventListener('mouseenter', () => {
+          const actions = r.querySelector('.coll-req-actions');
+          if (actions) actions.style.display = 'flex';
+        });
+        r.addEventListener('mouseleave', () => {
+          const actions = r.querySelector('.coll-req-actions');
+          if (actions) actions.style.display = 'none';
+        });
+
+        on(r, 'click', (e) => {
+          if (e.target.closest('.coll-action-btn')) return;
           loadRequest(req);
           currentRequestId = req.id;
           renderCollections();
         });
+
+        // Duplicate action
+        on(r.querySelector('[data-action="dup"]'), 'click', async (e) => {
+          e.stopPropagation();
+          const dupReq = { ...req };
+          dupReq.id = undefined;
+          dupReq.name = req.name + ' (copy)';
+          dupReq.timestamp = Date.now();
+          await dbPut('requests', dupReq);
+          await renderCollections();
+          toast('Request duplicated', 'success');
+        });
+
+        // Rename action
+        on(r.querySelector('[data-action="ren"]'), 'click', async (e) => {
+          e.stopPropagation();
+          const body = document.createElement('div');
+          body.innerHTML = `<input type="text" id="renameReqInput" value="${escapeHtml(req.name)}" style="width:100%;padding:8px;font-size:13px;">`;
+          showModal('Rename Request', body, async () => {
+            const newName = $('#renameReqInput').value.trim();
+            if (!newName) return;
+            req.name = newName;
+            await dbPut('requests', req);
+            await renderCollections();
+            toast('Request renamed', 'success');
+          });
+        });
+
+        // Delete action
+        on(r.querySelector('[data-action="del"]'), 'click', async (e) => {
+          e.stopPropagation();
+          showModal('Delete Request', `Delete "${req.name}"?`, async () => {
+            await dbDelete('requests', req.id);
+            if (currentRequestId === req.id) currentRequestId = null;
+            await renderCollections();
+            toast('Request deleted', 'info');
+          });
+        });
+
         children.appendChild(r);
       });
 
@@ -979,6 +1083,10 @@
       });
     });
 
+    on($('#historyFilter'), 'input', () => {
+      renderHistory();
+    });
+
     on($('#newEnvBtn'), 'click', () => {
       const body = document.createElement('div');
       body.innerHTML = `
@@ -1013,6 +1121,33 @@
       if (window._lastResponse) {
         navigator.clipboard.writeText(window._lastResponse.text).then(() => toast('Copied to clipboard', 'success'));
       }
+    });
+
+    on($('#copyCurlBtn'), 'click', () => {
+      const method = $('#httpMethod').value;
+      const url = $('#requestUrl').value.trim();
+      const headers = getKvData($('#headersList'));
+      let body = null;
+      const bodyType = $('#bodyType').value;
+      if (bodyType === 'graphql') {
+        const query = $('#graphqlQuery').value.trim();
+        const variables = $('#graphqlVariables').value.trim();
+        if (query) {
+          try {
+            body = JSON.stringify({ query, variables: variables ? JSON.parse(variables) : {} });
+          } catch {
+            body = JSON.stringify({ query, variables: {} });
+          }
+        }
+      } else if (bodyType !== 'none') {
+        body = $('#bodyEditor').value.trim();
+      }
+
+      let cmd = `curl -X ${method} "${url}"`;
+      Object.entries(headers).forEach(([k, v]) => { cmd += `\\n  -H "${k}: ${v}"`; });
+      if (body && method !== 'GET' && method !== 'HEAD') cmd += `\\n  -d '${body.replace(/'/g, "'\\''")}'`;
+
+      navigator.clipboard.writeText(cmd).then(() => toast('cURL copied to clipboard', 'success'));
     });
 
     on($('#downloadResponseBtn'), 'click', () => {
@@ -1212,6 +1347,17 @@
               <button class="btn-small" id="settingsClearHistory" style="flex:1;border-color:var(--accent-orange);color:var(--accent-orange);">Clear History</button>
               <button class="btn-small" id="settingsClearCollections" style="flex:1;border-color:var(--accent-orange);color:var(--accent-orange);">Clear Collections</button>
               <button class="btn-small" id="settingsClearAll" style="flex:1;border-color:var(--accent-red);color:var(--accent-red);">Clear All Data</button>
+            </div>
+          </div>
+
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Keyboard Shortcuts</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:11px;color:var(--text-secondary);">
+              <div><kbd style="background:var(--bg-elevated);padding:2px 6px;border-radius:4px;border:1px solid var(--border-default);font-family:var(--font-mono);">Ctrl+Enter</kbd> Send request</div>
+              <div><kbd style="background:var(--bg-elevated);padding:2px 6px;border-radius:4px;border:1px solid var(--border-default);font-family:var(--font-mono);">Ctrl+S</kbd> Save to collection</div>
+              <div><kbd style="background:var(--bg-elevated);padding:2px 6px;border-radius:4px;border:1px solid var(--border-default);font-family:var(--font-mono);">Ctrl+K</kbd> Focus URL bar</div>
+              <div><kbd style="background:var(--bg-elevated);padding:2px 6px;border-radius:4px;border:1px solid var(--border-default);font-family:var(--font-mono);">Ctrl+/</kbd> Toggle theme</div>
+              <div><kbd style="background:var(--bg-elevated);padding:2px 6px;border-radius:4px;border:1px solid var(--border-default);font-family:var(--font-mono);">Ctrl+1-4</kbd> Sidebar tabs</div>
             </div>
           </div>
 
@@ -1527,7 +1673,9 @@
           try { text = JSON.stringify(JSON.parse(text), null, parseInt(localStorage.getItem('gc-json-indent') || '2', 10)); } catch {}
         }
         try {
-          $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(text), localStorage.getItem('gc-auto-expand') === 'true') + '</div>';
+          const searchTerm = $('#resSearch').value.trim();
+          const searchMode = $('#searchOptions') ? $('#searchOptions').value : 'ci';
+          $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(text), localStorage.getItem('gc-auto-expand') === 'true', 0, searchTerm, searchMode) + '</div>';
         } catch {
           $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`;
         }
@@ -1559,7 +1707,7 @@
       const modalBody = document.createElement('div');
       const tabs = document.createElement('div');
       tabs.className = 'code-gen-tabs';
-      const langs = ['cURL', 'Fetch', 'Axios', 'Python'];
+      const langs = ['cURL', 'Fetch', 'Axios', 'Python', 'Ruby', 'Go', 'PHP'];
       let activeLang = 'cURL';
       const bodies = {};
 
@@ -1595,6 +1743,69 @@
           if (body && method !== 'GET' && method !== 'HEAD') opts.push(`json=${body}`);
           if (opts.length) code += `, ${opts.join(', ')}`;
           code += `)\\nprint(response.status_code)\\nprint(response.json())`;
+          return code;
+        }
+        if (lang === 'Ruby') {
+          let code = `require 'net/http'\\nrequire 'json'\\nrequire 'uri'\\n\\nuri = URI("${url}")`;
+          if (Object.keys(headers).length) {
+            code += `\\nheaders = {\\n`;
+            Object.entries(headers).forEach(([k, v], i) => {
+              code += `  '${k}': '${v}'${i < Object.keys(headers).length - 1 ? ',' : ''}\\n`;
+            });
+            code += `}`;
+          }
+          code += `\\n\\nhttp = Net::HTTP.new(uri.host, uri.port)\\nhttp.use_ssl = (uri.scheme == 'https')\\n`;
+          if (method !== 'GET') {
+            code += `request = Net::HTTP::${method.capitalize}.new(uri.request_uri)\\n`;
+            if (Object.keys(headers).length) code += `request.body = ${body}\\n`;
+            if (Object.keys(headers).length) code += `headers.each { |k, v| request[k] = v }\\n`;
+            code += `response = http.request(request)\\n`;
+          } else {
+            if (Object.keys(headers).length) code += `headers.each { |k, v| http[k] = v }\\n`;
+            code += `response = http.get(uri.request_uri)\\n`;
+          }
+          code += `puts response.code\\nputs response.body`;
+          return code;
+        }
+        if (lang === 'Go') {
+          let code = `package main\\n\\nimport (\\n  "bytes"\\n  "encoding/json"\\n  "fmt"\\n  "io"\\n  "net/http"\\n  "strings"\\n)\\n\\nfunc main() {`;
+          code += `\\n  url := "${url}"`;
+          if (body && method !== 'GET' && method !== 'HEAD') {
+            code += `\\n  payload := strings.NewReader(${body})`;
+          }
+          code += `\\n  req, _ := http.NewRequest("${method}", url, payload)`;
+          if (Object.keys(headers).length) {
+            code += `\\n  req.Header.Set("Content-Type", "application/json")`;
+            Object.entries(headers).forEach(([k, v]) => {
+              code += `\\n  req.Header.Set("${k}", "${v}")`;
+            });
+          }
+          code += `\\n  client := &http.Client{}\\n  resp, err := client.Do(req)\\n  if err != nil {\\n    panic(err)\\n  }\\n  defer resp.Body.Close()\\n  body, _ := io.ReadAll(resp.Body)\\n  fmt.Println(resp.Status)\\n  fmt.Println(string(body))\\n}`;
+          return code;
+        }
+        if (lang === 'PHP') {
+          let code = `<?php\\n\\n$url = "${url}";`;
+          if (Object.keys(headers).length) {
+            code += `\\n$headers = array(`;
+            Object.entries(headers).forEach(([k, v], i) => {
+              code += `  '${k}: ${v}'${i < Object.keys(headers).length - 1 ? ',' : ''}\\n`;
+            });
+            code += `);`;
+          }
+          if (body && method !== 'GET' && method !== 'HEAD') {
+            code += `\\n$data = ${body};`;
+          }
+          code += `\\n\\n$ch = curl_init();\\ncurl_setopt($ch, CURLOPT_URL, $url);`;
+          if (method !== 'GET') {
+            code += `\\ncurl_setopt($ch, CURLOPT_CUSTOMREQUEST, "${method}");`;
+          }
+          if (body && method !== 'GET' && method !== 'HEAD') {
+            code += `\\ncurl_setopt($ch, CURLOPT_POSTFIELDS, $data);`;
+          }
+          if (Object.keys(headers).length) {
+            code += `\\ncurl_setopt($ch, CURLOPT_HTTPHEADER, $headers);`;
+          }
+          code += `\\ncurl_setopt($ch, CURLOPT_RETURNTRANSFER, true);\\n\\n$response = curl_exec($ch);\\n$httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);\\ncurl_close($ch);\\n\\necho "HTTP Code: " . $httpCode . "\\n";\\necho $response;\\n?>`;
           return code;
         }
         return '';
@@ -1659,9 +1870,41 @@
         if (parts.length !== 3) throw new Error('Invalid JWT');
         const header = JSON.parse(atob(parts[0].replace(/-/g, '+').replace(/_/g, '/')));
         const payload = JSON.parse(atob(parts[1].replace(/-/g, '+').replace(/_/g, '/')));
-        $('#jwtOutput').innerHTML = `<div class="jwt-header">Header:\\n${JSON.stringify(header, null, 2)}</div>\\n<div class="jwt-payload">Payload:\\n${JSON.stringify(payload, null, 2)}</div>\\n<div class="jwt-sig">Signature: ${parts[2].slice(0, 16)}...</div>`;
+
+        // Format header with better inspection
+        let headerHtml = '<div class="jwt-section"><strong>Header</strong>';
+        headerHtml += '<div class="jwt-field"><span class="jwt-key">alg:</span> <span class="jwt-val">' + (header.alg || 'unknown') + '</span></div>';
+        headerHtml += '<div class="jwt-field"><span class="jwt-key">typ:</span> <span class="jwt-val">' + (header.typ || 'JWT') + '</span></div>';
+        if (header.kid) headerHtml += '<div class="jwt-field"><span class="jwt-key">kid:</span> <span class="jwt-val">' + header.kid + '</span></div>';
+        if (header.iss) headerHtml += '<div class="jwt-field"><span class="jwt-key">iss:</span> <span class="jwt-val">' + header.iss + '</span></div>';
+        headerHtml += '</div>';
+
+        // Format payload with better inspection
+        let payloadHtml = '<div class="jwt-section"><strong>Payload</strong>';
+        if (payload.iss) payloadHtml += '<div class="jwt-field"><span class="jwt-key">iss:</span> <span class="jwt-val">' + payload.iss + '</span></div>';
+        if (payload.sub) payloadHtml += '<div class="jwt-field"><span class="jwt-key">sub:</span> <span class="jwt-val">' + payload.sub + '</span></div>';
+        if (payload.aud) payloadHtml += '<div class="jwt-field"><span class="jwt-key">aud:</span> <span class="jwt-val">' + (Array.isArray(payload.aud) ? payload.aud.join(', ') : payload.aud) + '</span></div>';
+        if (payload.exp) {
+          const expDate = new Date(payload.exp * 1000);
+          const isExpired = Date.now() > payload.exp * 1000;
+          payloadHtml += '<div class="jwt-field"><span class="jwt-key">exp:</span> <span class="jwt-val" style="color:' + (isExpired ? 'var(--accent-red)' : 'var(--accent-green)') + '">' + expDate.toLocaleString() + (isExpired ? ' (EXPIRED)' : '') + '</span></div>';
+        }
+        if (payload.iat) {
+          const iatDate = new Date(payload.iat * 1000);
+          payloadHtml += '<div class="jwt-field"><span class="jwt-key">iat:</span> <span class="jwt-val">' + iatDate.toLocaleString() + '</span></div>';
+        }
+        if (payload.nbf) {
+          const nbfDate = new Date(payload.nbf * 1000);
+          payloadHtml += '<div class="jwt-field"><span class="jwt-key">nbf:</span> <span class="jwt-val">' + nbfDate.toLocaleString() + '</span></div>';
+        }
+        payloadHtml += '</div>';
+
+        // Signature
+        const sigHtml = '<div class="jwt-section"><strong>Signature</strong><div class="jwt-field"><span class="jwt-val">' + parts[2].slice(0, 32) + '...</span></div></div>';
+
+        $('#jwtOutput').innerHTML = headerHtml + payloadHtml + sigHtml;
       } catch (e) {
-        $('#jwtOutput').textContent = 'Invalid JWT token';
+        $('#jwtOutput').innerHTML = '<div class="jwt-error">Invalid JWT token: ' + e.message + '</div>';
       }
     });
 
@@ -1698,76 +1941,155 @@
       modalBody.style.maxHeight = '400px';
       modalBody.style.overflow = 'auto';
 
+      // Add parallel execution option
+      const optionsDiv = document.createElement('div');
+      optionsDiv.style.cssText = 'display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border-subtle);margin-bottom:8px;';
+      optionsDiv.innerHTML = `
+        <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" id="parallelRun" style="accent-color:var(--accent-indigo);">
+          Run in parallel (faster, but may overload server)
+        </label>
+      `;
+      modalBody.appendChild(optionsDiv);
+
       const resultsDiv = document.createElement('div');
       resultsDiv.innerHTML = '<div style="color:var(--text-tertiary);margin-bottom:8px">Running collection...</div>';
       modalBody.appendChild(resultsDiv);
 
       showModal('Collection Runner', modalBody, null, null);
 
+      const parallel = document.getElementById('parallelRun').checked;
       let passCount = 0, failCount = 0;
       const total = allReqs.length;
 
-      for (const req of allReqs) {
-        try {
-          const start = performance.now();
-          const headers = req.headers || {};
-          let body = null;
-          if (req.body && req.bodyType !== 'none') {
-            if (req.bodyType === 'graphql' && typeof req.body === 'object') {
-              const variables = req.body.variables ? JSON.parse(req.body.variables) : {};
-              body = JSON.stringify({ query: req.body.query, variables });
-            } else {
-              body = req.body;
+      if (parallel) {
+        // Parallel execution
+        const promises = allReqs.map(async (req) => {
+          try {
+            const start = performance.now();
+            const headers = req.headers || {};
+            let body = null;
+            if (req.body && req.bodyType !== 'none') {
+              if (req.bodyType === 'graphql' && typeof req.body === 'object') {
+                const variables = req.body.variables ? JSON.parse(req.body.variables) : {};
+                body = JSON.stringify({ query: req.body.query, variables });
+              } else {
+                body = req.body;
+              }
             }
+            const cRunner = new AbortController();
+            const tRunner = setTimeout(() => cRunner.abort(), 10000);
+            const resp = await fetch(req.url, { method: req.method, headers, body, signal: cRunner.signal });
+            clearTimeout(tRunner);
+            const time = Math.round(performance.now() - start);
+            const status = resp.status;
+            const ok = status < 400;
+            if (ok) passCount++; else failCount++;
+            return { req, status: status, ok, time, error: null };
+          } catch (err) {
+            failCount++;
+            return { req, status: 'ERR', ok: false, time: 0, error: err.message };
           }
-          const cRunner = new AbortController();
-          const tRunner = setTimeout(() => cRunner.abort(), 10000);
-          const resp = await fetch(req.url, { method: req.method, headers, body, signal: cRunner.signal });
-          clearTimeout(tRunner);
-          const time = Math.round(performance.now() - start);
-          const status = resp.status;
-          const ok = status < 400;
-          if (ok) passCount++; else failCount++;
+        });
+
+        const results = await Promise.all(promises);
+        results.forEach(r => {
           const row = document.createElement('div');
           row.style.cssText = 'display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;';
-          row.innerHTML = `<span class="hist-method ${req.method.toLowerCase()}" style="flex-shrink:0">${req.method}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)}</span><span style="color:${ok ? 'var(--accent-green)' : 'var(--accent-red)'};font-weight:600">${status}</span><span style="color:var(--text-muted);flex-shrink:0">${time}ms</span>`;
+          if (r.status === 'ERR') {
+            row.innerHTML = `<span class="hist-method ${r.req.method.toLowerCase()}" style="flex-shrink:0">${r.req.method}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.req.name)}</span><span style="color:var(--accent-red);font-weight:600">ERR</span>`;
+          } else {
+            row.innerHTML = `<span class="hist-method ${r.req.method.toLowerCase()}" style="flex-shrink:0">${r.req.method}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(r.req.name)}</span><span style="color:${r.ok ? 'var(--accent-green)' : 'var(--accent-red)'};font-weight:600">${r.status}</span><span style="color:var(--text-muted);flex-shrink:0">${r.time}ms</span>`;
+          }
           resultsDiv.appendChild(row);
-        } catch (err) {
-          failCount++;
-          const row = document.createElement('div');
-          row.style.cssText = 'display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;';
-          row.innerHTML = `<span class="hist-method ${req.method.toLowerCase()}" style="flex-shrink:0">${req.method}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)}</span><span style="color:var(--accent-red);font-weight:600">ERR</span>`;
-          resultsDiv.appendChild(row);
+        });
+      } else {
+        // Sequential execution
+        for (const req of allReqs) {
+          try {
+            const start = performance.now();
+            const headers = req.headers || {};
+            let body = null;
+            if (req.body && req.bodyType !== 'none') {
+              if (req.bodyType === 'graphql' && typeof req.body === 'object') {
+                const variables = req.body.variables ? JSON.parse(req.body.variables) : {};
+                body = JSON.stringify({ query: req.body.query, variables });
+              } else {
+                body = req.body;
+              }
+            }
+            const cRunner = new AbortController();
+            const tRunner = setTimeout(() => cRunner.abort(), 10000);
+            const resp = await fetch(req.url, { method: req.method, headers, body, signal: cRunner.signal });
+            clearTimeout(tRunner);
+            const time = Math.round(performance.now() - start);
+            const status = resp.status;
+            const ok = status < 400;
+            if (ok) passCount++; else failCount++;
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;';
+            row.innerHTML = `<span class="hist-method ${req.method.toLowerCase()}" style="flex-shrink:0">${req.method}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)}</span><span style="color:${ok ? 'var(--accent-green)' : 'var(--accent-red)'};font-weight:600">${status}</span><span style="color:var(--text-muted);flex-shrink:0">${time}ms</span>`;
+            resultsDiv.appendChild(row);
+          } catch (err) {
+            failCount++;
+            const row = document.createElement('div');
+            row.style.cssText = 'display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;';
+            row.innerHTML = `<span class="hist-method ${req.method.toLowerCase()}" style="flex-shrink:0">${req.method}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)}</span><span style="color:var(--accent-red);font-weight:600">ERR</span>`;
+            resultsDiv.appendChild(row);
+          }
         }
       }
 
       const summary = document.createElement('div');
       summary.style.cssText = 'margin-top:10px;padding-top:10px;border-top:2px solid var(--border-default);font-size:13px;font-weight:600;';
-      summary.innerHTML = `<span style="color:var(--accent-green)">${passCount} passed</span> · <span style="color:var(--accent-red)">${failCount} failed</span> · ${total} total`;
+      summary.innerHTML = `<span style="color:var(--accent-green)">${passCount} passed</span> · <span style="color:var(--accent-red)">${failCount} failed</span> · ${total} total${parallel ? ' (parallel)' : ' (sequential)'}`;
       resultsDiv.appendChild(summary);
     });
 
     on($('#resSearch'), 'input', () => {
-      const term = $('#resSearch').value.trim().toLowerCase();
-      if (!window._lastResponse || !term) {
-        if (window._lastResponse) {
-          const fmt = $('#resFormat').value;
-          const text = window._lastResponse.text;
-          if (fmt === 'raw') $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`;
-          else {
-            try {
-              $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(text)) + '</div>';
-            } catch {
-              $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`;
-            }
-          }
-        }
-        return;
-      }
+      if (!window._lastResponse) return;
+      const term = $('#resSearch').value.trim();
+      const fmt = $('#resFormat').value;
       const text = window._lastResponse.text;
-      const lines = text.split('\n');
-      const filtered = lines.filter(l => l.toLowerCase().includes(term));
-      $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(filtered.join('\n') || '// No matches')}</code>`;
+      const searchMode = $('#searchOptions') ? $('#searchOptions').value : 'ci';
+
+      if (fmt === 'raw') {
+        if (!term) {
+          $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`;
+        } else {
+          const lines = text.split('\n');
+          let filtered;
+          if (searchMode === 'cs') {
+            filtered = lines.filter(l => l.includes(term));
+          } else if (searchMode === 'regex') {
+            try {
+              const regex = new RegExp(term, 'i');
+              filtered = lines.filter(l => regex.test(l));
+            } catch {
+              filtered = lines.filter(l => l.toLowerCase().includes(term.toLowerCase()));
+            }
+          } else {
+            filtered = lines.filter(l => l.toLowerCase().includes(term.toLowerCase()));
+          }
+          $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(filtered.join('\n') || '// No matches')}</code>`;
+        }
+      } else if (fmt === 'preview') {
+        $('#responseBody').innerHTML = `<iframe style="width:100%;height:100%;border:none;background:white;" srcdoc="${escapeHtml(text)}"></iframe>`;
+      } else {
+        try {
+          $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(text), localStorage.getItem('gc-auto-expand') === 'true', 0, term, searchMode) + '</div>';
+        } catch {
+          $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`;
+        }
+      }
+    });
+
+    on($('#searchOptions'), 'change', () => {
+      if (!window._lastResponse) return;
+      const term = $('#resSearch').value.trim();
+      if (!term) return;
+      // Trigger search again with new mode
+      $('#resSearch').dispatchEvent(new Event('input'));
     });
 
     // Init auth fields
@@ -1802,25 +2124,85 @@
 
   function renderDiff(a, b, path = '') {
     if (typeof a !== typeof b || (a === null) !== (b === null)) {
-      return `<div class="diff-key">${path || 'root'}</div><div class="diff-del">${JSON.stringify(a)}</div><div class="diff-add">${JSON.stringify(b)}</div>`;
+      return `<div class="diff-row diff-change"><div class="diff-path">${path || 'root'}</div><div class="diff-del">${JSON.stringify(a)}</div><div class="diff-add">${JSON.stringify(b)}</div></div>`;
     }
     if (a === null || typeof a !== 'object') {
-      if (a === b) return `<div class="diff-same">${path ? path + ': ' : ''}${JSON.stringify(a)}</div>`;
-      return `<div class="diff-key">${path || 'root'}</div><div class="diff-del">${JSON.stringify(a)}</div><div class="diff-add">${JSON.stringify(b)}</div>`;
+      if (a === b) return `<div class="diff-row diff-same"><div class="diff-path">${path ? path + ': ' : ''}</div><div class="diff-val">${JSON.stringify(a)}</div></div>`;
+      return `<div class="diff-row diff-change"><div class="diff-path">${path || 'root'}</div><div class="diff-del">${JSON.stringify(a)}</div><div class="diff-add">${JSON.stringify(b)}</div></div>`;
     }
     if (Array.isArray(a) !== Array.isArray(b)) {
-      return `<div class="diff-key">${path || 'root'}</div><div class="diff-del">${JSON.stringify(a)}</div><div class="diff-add">${JSON.stringify(b)}</div>`;
+      return `<div class="diff-row diff-change"><div class="diff-path">${path || 'root'}</div><div class="diff-del">${JSON.stringify(a)}</div><div class="diff-add">${JSON.stringify(b)}</div></div>`;
     }
+    
     let html = '';
     const allKeys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
-    allKeys.forEach(k => {
-      const newPath = path ? `${path}.${k}` : k;
-      if (!(k in a)) html += `<div class="diff-key">${newPath}</div><div class="diff-add">${JSON.stringify(b[k])}</div>`;
-      else if (!(k in b)) html += `<div class="diff-key">${newPath}</div><div class="diff-del">${JSON.stringify(a[k])}</div>`;
-      else html += renderDiff(a[k], b[k], newPath);
-    });
+    
+    if (Array.isArray(a)) {
+      // Array diff
+      const maxLen = Math.max(a.length, b.length);
+      for (let i = 0; i < maxLen; i++) {
+        const newPath = path ? `${path}[${i}]` : `[${i}]`;
+        if (!(i < a.length)) {
+          html += `<div class="diff-row diff-add"><div class="diff-path">${newPath}</div><div class="diff-val">${JSON.stringify(b[i])}</div></div>`;
+        } else if (!(i < b.length)) {
+          html += `<div class="diff-row diff-del"><div class="diff-path">${newPath}</div><div class="diff-val">${JSON.stringify(a[i])}</div></div>`;
+        } else if (JSON.stringify(a[i]) !== JSON.stringify(b[i])) {
+          html += renderDiff(a[i], b[i], newPath);
+        } else {
+          html += `<div class="diff-row diff-same"><div class="diff-path">${newPath}</div><div class="diff-val">${JSON.stringify(a[i])}</div></div>`;
+        }
+      }
+    } else {
+      // Object diff
+      allKeys.forEach(k => {
+        const newPath = path ? `${path}.${k}` : k;
+        if (!(k in a)) {
+          html += `<div class="diff-row diff-add"><div class="diff-path">${newPath}</div><div class="diff-val">${JSON.stringify(b[k])}</div></div>`;
+        } else if (!(k in b)) {
+          html += `<div class="diff-row diff-del"><div class="diff-path">${newPath}</div><div class="diff-val">${JSON.stringify(a[k])}</div></div>`;
+        } else if (JSON.stringify(a[k]) !== JSON.stringify(b[k])) {
+          html += renderDiff(a[k], b[k], newPath);
+        } else {
+          html += `<div class="diff-row diff-same"><div class="diff-path">${newPath}</div><div class="diff-val">${JSON.stringify(a[k])}</div></div>`;
+        }
+      });
+    }
     return html;
   }
+
+  // Keyboard shortcuts
+  on(document, 'keydown', (e) => {
+    // Ctrl/Cmd + Enter to send request
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      sendRequest();
+    }
+    // Ctrl/Cmd + S to save to collection
+    if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      e.preventDefault();
+      $('#saveBtn').click();
+    }
+    // Ctrl/Cmd + K to focus URL bar
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      $('#requestUrl').focus();
+      $('#requestUrl').select();
+    }
+    // Ctrl/Cmd + / to toggle theme
+    if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+      e.preventDefault();
+      $('#themeToggle').click();
+    }
+    // Ctrl/Cmd + 1-4 to switch sidebar tabs
+    if ((e.ctrlKey || e.metaKey) && e.key >= '1' && e.key <= '4') {
+      e.preventDefault();
+      const tabs = ['collections', 'history', 'env', 'tools'];
+      const idx = parseInt(e.key) - 1;
+      if (tabs[idx]) {
+        document.querySelector(`[data-tab="${tabs[idx]}"]`)?.click();
+      }
+    }
+  });
 
   init().catch(err => {
     console.error('Init error:', err);

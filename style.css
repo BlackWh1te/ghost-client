@@ -862,6 +862,13 @@ html, body {
 
 .json-tree .indent { padding-left: 18px; }
 
+.json-tree .search-highlight {
+  background: rgba(234, 179, 8, 0.3);
+  border-radius: 2px;
+  padding: 0 2px;
+  color: inherit;
+}
+
 /* Headers Table */
 .headers-table {
   padding: 16px;
@@ -1043,6 +1050,15 @@ html, body {
   color: var(--text-primary);
 }
 
+.coll-req-actions {
+  display: none;
+  gap: 4px;
+}
+
+.coll-req-item:hover .coll-req-actions {
+  display: flex;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
@@ -1065,6 +1081,105 @@ html, body {
   width: 48px;
   height: 48px;
   opacity: 0.3;
+}
+
+/* JWT Decoder */
+.jwt-section {
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.jwt-section:last-child {
+  border-bottom: none;
+}
+
+.jwt-field {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.jwt-key {
+  color: var(--accent-indigo-soft);
+  font-weight: 600;
+  min-width: 40px;
+}
+
+.jwt-val {
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.jwt-error {
+  color: var(--accent-red);
+  font-size: 12px;
+  padding: 8px;
+}
+
+/* JSON Diff */
+.diff-row {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 12px;
+  font-family: var(--font-mono);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.diff-row:last-child {
+  border-bottom: none;
+}
+
+.diff-path {
+  min-width: 120px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+}
+
+.diff-val {
+  color: var(--text-secondary);
+  flex: 1;
+  word-break: break-all;
+}
+
+.diff-same {
+  background: transparent;
+}
+
+.diff-change {
+  background: rgba(234, 179, 8, 0.05);
+}
+
+.diff-add {
+  background: rgba(34, 197, 94, 0.05);
+}
+
+.diff-del {
+  background: rgba(239, 68, 68, 0.05);
+}
+
+.diff-add .diff-path {
+  color: var(--accent-green);
+}
+
+.diff-del .diff-path {
+  color: var(--accent-red);
+}
+
+.diff-change .diff-path {
+  color: var(--accent-yellow);
+}
+
+.diff-del {
+  text-decoration: line-through;
+  opacity: 0.7;
+}
+
+.diff-add {
+  font-weight: 600;
 }
 
 /* Environment editor */
