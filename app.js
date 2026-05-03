@@ -893,6 +893,97 @@
       root.setAttribute('data-theme', isLight ? 'dark' : 'light');
     });
 
+    on($('#settingsBtn'), 'click', () => {
+      const body = document.createElement('div');
+      body.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:16px;">
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Theme</label>
+            <select id="settingsTheme" style="width:100%;padding:6px 10px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+              <option value="system">System</option>
+              <option value="dark">Dark</option>
+              <option value="light">Light</option>
+            </select>
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Default Timeout (seconds)</label>
+            <input type="number" id="settingsTimeout" value="${$('#timeoutInput').value}" min="1" max="300" style="width:100%;padding:6px 10px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;font-family:var(--font-mono);">
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Response Font Size</label>
+            <input type="range" id="settingsFontSize" min="10" max="18" value="12" style="width:100%;accent-color:var(--accent-indigo);">
+            <div style="text-align:center;font-size:11px;color:var(--text-tertiary);margin-top:2px"><span id="fontSizeVal">12</span>px</div>
+          </div>
+          <div style="border-top:1px solid var(--border-subtle);padding-top:12px;">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--accent-red);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Danger Zone</label>
+            <button class="btn-small" id="settingsClearAll" style="width:100%;border-color:var(--accent-red);color:var(--accent-red);">Clear All Local Data</button>
+          </div>
+          <div style="border-top:1px solid var(--border-subtle);padding-top:8px;font-size:11px;color:var(--text-muted);">
+            Ghost Client v1.0 &middot; 100% client-side &middot; IndexedDB storage
+          </div>
+        </div>
+      `;
+
+      showModal('Settings', body);
+
+      // Theme handler
+      const themeSel = body.querySelector('#settingsTheme');
+      const savedTheme = localStorage.getItem('gc-theme') || 'system';
+      themeSel.value = savedTheme;
+      on(themeSel, 'change', () => {
+        const val = themeSel.value;
+        localStorage.setItem('gc-theme', val);
+        if (val === 'system') {
+          document.documentElement.removeAttribute('data-theme');
+        } else {
+          document.documentElement.setAttribute('data-theme', val);
+        }
+      });
+
+      // Timeout handler
+      const toInput = body.querySelector('#settingsTimeout');
+      on(toInput, 'change', () => {
+        $('#timeoutInput').value = Math.max(1, Math.min(300, parseInt(toInput.value || '30', 10)));
+        localStorage.setItem('gc-timeout', $('#timeoutInput').value);
+      });
+
+      // Font size handler
+      const fsRange = body.querySelector('#settingsFontSize');
+      const fsVal = body.querySelector('#fontSizeVal');
+      const savedFs = localStorage.getItem('gc-fontsize');
+      if (savedFs) { fsRange.value = savedFs; fsVal.textContent = savedFs; }
+      on(fsRange, 'input', () => {
+        const val = fsRange.value;
+        fsVal.textContent = val;
+        document.querySelectorAll('.response-body, .json-tree, .code-gen-body').forEach(el => { el.style.fontSize = val + 'px'; });
+        localStorage.setItem('gc-fontsize', val);
+      });
+
+      // Clear all data handler
+      on(body.querySelector('#settingsClearAll'), 'click', () => {
+        showModal('Confirm Delete', 'This will erase ALL collections, requests, history, and environments. This cannot be undone.', async () => {
+          await dbClear('collections');
+          await dbClear('requests');
+          await dbClear('history');
+          await dbClear('environments');
+          await renderCollections();
+          await renderHistory();
+          await renderEnvironments();
+          toast('All data cleared', 'info');
+        });
+      });
+    });
+
+    // Apply saved settings on load
+    (function applySettings() {
+      const savedTheme = localStorage.getItem('gc-theme');
+      if (savedTheme && savedTheme !== 'system') document.documentElement.setAttribute('data-theme', savedTheme);
+      const savedTimeout = localStorage.getItem('gc-timeout');
+      if (savedTimeout) $('#timeoutInput').value = savedTimeout;
+      const savedFs = localStorage.getItem('gc-fontsize');
+      if (savedFs) document.querySelectorAll('.response-body, .json-tree, .code-gen-body').forEach(el => { el.style.fontSize = savedFs + 'px'; });
+    })();
+
     // Res format toggle
     on($('#resFormat'), 'change', () => {
       if (!window._lastResponse) return;
