@@ -132,7 +132,7 @@
   }
 
   // ===== JSON Tree Renderer =====
-  function renderJsonTree(obj, level = 0) {
+  function renderJsonTree(obj, autoExpand = false, level = 0) {
     if (obj === null) return '<span class="null">null</span>';
     const type = typeof obj;
     if (type === 'string') return `<span class="string">"${escapeHtml(obj)}"</span>`;
@@ -142,9 +142,10 @@
     if (Array.isArray(obj)) {
       if (obj.length === 0) return '<span class="boolean">[]</span>';
       const id = 'arr_' + Math.random().toString(36).slice(2);
-      let html = `<span class="expanded" id="${id}"><span class="toggle" onclick="toggleJson('${id}')"></span><span class="boolean">[</span><span class="collapsible">`;
+      const cls = autoExpand ? 'expanded' : 'collapsed';
+      let html = `<span class="${cls}" id="${id}"><span class="toggle" onclick="toggleJson('${id}')"></span><span class="boolean">[</span><span class="collapsible">`;
       obj.forEach((item, i) => {
-        html += `<div class="indent">${renderJsonTree(item, level + 1)}${i < obj.length - 1 ? '<span class="text-tertiary">,</span>' : ''}</div>`;
+        html += `<div class="indent">${renderJsonTree(item, autoExpand, level + 1)}${i < obj.length - 1 ? '<span class="text-tertiary">,</span>' : ''}</div>`;
       });
       html += `</span><span class="boolean">]</span></span>`;
       return html;
@@ -153,9 +154,10 @@
     const keys = Object.keys(obj);
     if (keys.length === 0) return '<span class="boolean">{}</span>';
     const id = 'obj_' + Math.random().toString(36).slice(2);
-    let html = `<span class="expanded" id="${id}"><span class="toggle" onclick="toggleJson('${id}')"></span><span class="boolean">{</span><span class="collapsible">`;
+    const cls = autoExpand ? 'expanded' : 'collapsed';
+    let html = `<span class="${cls}" id="${id}"><span class="toggle" onclick="toggleJson('${id}')"></span><span class="boolean">{</span><span class="collapsible">`;
     keys.forEach((key, i) => {
-      html += `<div class="indent"><span class="key">"${escapeHtml(key)}"</span><span class="text-tertiary">: </span>${renderJsonTree(obj[key], level + 1)}${i < keys.length - 1 ? '<span class="text-tertiary">,</span>' : ''}</div>`;
+      html += `<div class="indent"><span class="key">"${escapeHtml(key)}"</span><span class="text-tertiary">: </span>${renderJsonTree(obj[key], autoExpand, level + 1)}${i < keys.length - 1 ? '<span class="text-tertiary">,</span>' : ''}</div>`;
     });
     html += `</span><span class="boolean">}</span></span>`;
     return html;
@@ -341,7 +343,7 @@
       $('#statusCode').textContent = code;
       $('#statusCode').className = 'status-code ' + (code < 300 ? 'success' : code < 400 ? 'warning' : code < 500 ? 'error' : 'error');
       $('#statusText').textContent = response.statusText;
-      $('#responseTime').textContent = elapsed + ' ms';
+      $('#responseTime').textContent = localStorage.getItem('gc-time-ms') === 'true' ? elapsed + ' ms' : (elapsed / 1000).toFixed(2) + ' s';
       $('#responseSize').textContent = formatBytes(size);
 
       // Headers
@@ -360,11 +362,12 @@
         try { formatted = JSON.stringify(JSON.parse(responseText), null, indent); } catch {}
       }
 
-      $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(responseText)) + '</div>';
+      $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(responseText), localStorage.getItem('gc-auto-expand') === 'true') + '</div>';
       window._lastResponse = { text: responseText, headers: resHeaders, status: code, statusText: response.statusText, time: elapsed, size };
 
       // Save to history
-      await saveHistory({
+      if (localStorage.getItem('gc-auto-save') !== 'false') {
+        await saveHistory({
         method,
         url: rawUrl,
         headers: getKvData($('#headersList')),
@@ -527,19 +530,23 @@
 
   async function renderHistory() {
     const container = $('#historyList');
-    const items = (await dbGet('history')).sort((a, b) => b.timestamp - a.timestamp);
+    let items = await dbGet('history');
+    const sortBy = localStorage.getItem('gc-history-sort') || 'time';
+    if (sortBy === 'name') items.sort((a, b) => a.url.localeCompare(b.url));
+    else items.sort((a, b) => b.timestamp - a.timestamp);
     container.innerHTML = '';
     if (items.length === 0) {
       container.innerHTML = '<div class="empty-state"><div>Send your first request to see history here</div></div>';
       return;
     }
+    const tsFormat = localStorage.getItem('gc-timestamps') || 'relative';
     items.forEach(item => {
       const el = document.createElement('div');
       el.className = 'hist-item';
       el.innerHTML = `
         <span class="hist-method ${item.method.toLowerCase()}">${item.method}</span>
         <span class="hist-url">${escapeHtml(truncate(item.url, 35))}</span>
-        <span style="font-size:10px;color:var(--text-muted)">${formatTime(item.timestamp)}</span>
+        <span style="font-size:10px;color:var(--text-muted)">${formatTime(item.timestamp, tsFormat)}</span>
       `;
       on(el, 'click', () => loadRequestFromHistory(item));
       container.appendChild(el);
@@ -557,8 +564,9 @@
   }
 
   function truncate(s, n) { return s.length > n ? s.slice(0, n) + '...' : s; }
-  function formatTime(ts) {
+  function formatTime(ts, format = 'relative') {
     const d = new Date(ts);
+    if (format === 'absolute') return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
     const now = new Date();
     const diff = (now - d) / 1000;
     if (diff < 60) return 'now';
@@ -914,44 +922,59 @@
     on($('#settingsBtn'), 'click', () => {
       const body = document.createElement('div');
       body.innerHTML = `
-        <div style="display:flex;flex-direction:column;gap:16px;max-height:500px;overflow-y:auto;padding-right:8px;">
+        <div style="display:flex;flex-direction:column;gap:20px;max-height:580px;overflow-y:auto;padding-right:12px;">
+          
           <div>
-            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Appearance</label>
-            <div style="display:flex;flex-direction:column;gap:8px;">
-              <div style="display:flex;align-items:center;gap:8px;">
-                <label style="flex:1;font-size:12px;">Theme</label>
-                <select id="settingsTheme" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Appearance</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Theme</label>
+                <select id="settingsTheme" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
                   <option value="system">System</option>
                   <option value="dark">Dark</option>
                   <option value="light">Light</option>
                 </select>
               </div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <label style="flex:1;font-size:12px;">Response Font Size</label>
-                <input type="range" id="settingsFontSize" min="10" max="18" value="12" style="flex:1;accent-color:var(--accent-indigo);">
-                <span id="fontSizeVal" style="width:30px;font-size:11px;color:var(--text-tertiary);text-align:center">12</span>
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Compact Mode</label>
+                <select id="settingsCompact" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="false">Normal</option>
+                  <option value="true">Compact</option>
+                </select>
               </div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <label style="flex:1;font-size:12px;">Sidebar Width</label>
-                <select id="settingsSidebarWidth" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
-                  <option value="220">Narrow (220px)</option>
-                  <option value="260">Default (260px)</option>
-                  <option value="300">Wide (300px)</option>
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Response Font Size: <span id="fontSizeVal">12</span>px</label>
+                <input type="range" id="settingsFontSize" min="10" max="22" value="12" style="width:100%;accent-color:var(--accent-indigo);">
+              </div>
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Sidebar Width</label>
+                <input type="number" id="settingsSidebarWidth" min="180" max="400" step="10" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;font-family:var(--font-mono;">
+              </div>
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Panel Split (%)</label>
+                <input type="range" id="settingsPanelSplit" min="30" max="70" value="50" style="width:100%;accent-color:var(--accent-indigo;">
+                <div style="text-align:center;font-size:11px;color:var(--text-tertiary)"><span id="panelSplitVal">50</span>%</div>
+              </div>
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Font Family</label>
+                <select id="settingsFontFamily" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="mono">Monospace</option>
+                  <option value="sans">Sans-serif</option>
                 </select>
               </div>
             </div>
           </div>
 
           <div>
-            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Requests</label>
-            <div style="display:flex;flex-direction:column;gap:8px;">
-              <div style="display:flex;align-items:center;gap:8px;">
-                <label style="flex:1;font-size:12px;">Default Timeout (s)</label>
-                <input type="number" id="settingsTimeout" value="${$('#timeoutInput').value}" min="1" max="300" style="width:60px;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;font-family:var(--font-mono);">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Requests</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Default Timeout (s)</label>
+                <input type="number" id="settingsTimeout" value="${$('#timeoutInput').value}" min="1" max="600" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;font-family:var(--font-mono;">
               </div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <label style="flex:1;font-size:12px;">Default HTTP Method</label>
-                <select id="settingsDefaultMethod" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Default Method</label>
+                <select id="settingsDefaultMethod" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
                   <option value="GET">GET</option>
                   <option value="POST">POST</option>
                   <option value="PUT">PUT</option>
@@ -959,56 +982,128 @@
                   <option value="DELETE">DELETE</option>
                 </select>
               </div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <label style="flex:1;font-size:12px;">History Retention</label>
-                <select id="settingsHistoryLimit" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
-                  <option value="50">50 requests</option>
-                  <option value="100">100 requests</option>
-                  <option value="200">200 requests</option>
-                  <option value="500">500 requests</option>
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">History Limit</label>
+                <input type="number" id="settingsHistoryLimit" min="10" max="1000" step="10" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;font-family:var(--font-mono;">
+              </div>
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Default Body Type</label>
+                <select id="settingsDefaultBody" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="none">None</option>
+                  <option value="json">JSON</option>
+                  <option value="form">Form Data</option>
+                  <option value="text">Plain Text</option>
                 </select>
+              </div>
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Default Auth</label>
+                <select id="settingsDefaultAuth" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="none">None</option>
+                  <option value="bearer">Bearer</option>
+                  <option value="basic">Basic</option>
+                  <option value="apikey">API Key</option>
+                </select>
+              </div>
+              <div style="grid-column:span 2">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+                  <input type="checkbox" id="settingsAutoSave" style="accent-color:var(--accent-indigo);">
+                  Auto-save every request to history
+                </label>
               </div>
             </div>
           </div>
 
           <div>
-            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Responses</label>
-            <div style="display:flex;flex-direction:column;gap:8px;">
-              <div style="display:flex;align-items:center;gap:8px;">
-                <label style="flex:1;font-size:12px;">Default View</label>
-                <select id="settingsResView" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Responses</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Default View</label>
+                <select id="settingsResView" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
                   <option value="pretty">Pretty</option>
                   <option value="raw">Raw</option>
                 </select>
               </div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <label style="flex:1;font-size:12px;">JSON Indent Size</label>
-                <select id="settingsJsonIndent" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
-                  <option value="2">2 spaces</option>
-                  <option value="4">4 spaces</option>
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">JSON Indent</label>
+                <input type="number" id="settingsJsonIndent" min="2" max="8" step="2" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;font-family:var(--font-mono;">
+              </div>
+              <div style="grid-column:span 2">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+                  <input type="checkbox" id="settingsAutoFormat" style="accent-color:var(--accent-indigo);">
+                  Auto-format JSON on response
+                </label>
+              </div>
+              <div style="grid-column:span 2">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+                  <input type="checkbox" id="settingsAutoExpand" style="accent-color:var(--accent-indigo);">
+                  Auto-expand JSON tree
+                </label>
+              </div>
+              <div style="grid-column:span 2">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+                  <input type="checkbox" id="settingsLineNumbers" style="accent-color:var(--accent-indigo);">
+                  Show line numbers in response
+                </label>
+              </div>
+              <div style="grid-column:span 2">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+                  <input type="checkbox" id="settingsWordWrap" style="accent-color:var(--accent-indigo);">
+                  Word wrap in response
+                </label>
+              </div>
+              <div style="grid-column:span 2">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+                  <input type="checkbox" id="settingsSoundNotify" style="accent-color:var(--accent-indigo);">
+                  Sound notification on request
+                </label>
+              </div>
+              <div style="grid-column:span 2">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+                  <input type="checkbox" id="settingsTimeMs" style="accent-color:var(--accent-indigo);">
+                  Show response time in milliseconds
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">History & Collections</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Sort History By</label>
+                <select id="settingsHistorySort" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="time">Most Recent</option>
+                  <option value="name">Name</option>
                 </select>
               </div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <input type="checkbox" id="settingsAutoFormat" style="accent-color:var(--accent-indigo);">
-                <label for="settingsAutoFormat" style="flex:1;font-size:12px;cursor:pointer;">Auto-format JSON responses</label>
+              <div>
+                <label style="display:block;font-size:12px;margin-bottom:4px">Show Timestamps</label>
+                <select id="settingsTimestamps" style="width:100%;padding:6px 10px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="relative">Relative (5m ago)</option>
+                  <option value="absolute">Absolute (2025-05-03)</option>
+                </select>
               </div>
-              <div style="display:flex;align-items:center;gap:8px;">
-                <input type="checkbox" id="settingsSoundNotify" style="accent-color:var(--accent-indigo);">
-                <label for="settingsSoundNotify" style="flex:1;font-size:12px;cursor:pointer;">Sound notification on request</label>
+              <div style="grid-column:span 2">
+                <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;">
+                  <input type="checkbox" id="settingsCollapseSidebar" style="accent-color:var(--accent-indigo);">
+                  Start with sidebar collapsed
+                </label>
               </div>
             </div>
           </div>
 
-          <div style="border-top:1px solid var(--border-subtle);padding-top:12px;">
-            <label style="display:block;font-size:11px;font-weight:600;color:var(--accent-red);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Danger Zone</label>
-            <div style="display:flex;flex-direction:column;gap:8px;">
-              <button class="btn-small" id="settingsClearHistory" style="width:100%;border-color:var(--accent-orange);color:var(--accent-orange);">Clear History Only</button>
-              <button class="btn-small" id="settingsClearAll" style="width:100%;border-color:var(--accent-red);color:var(--accent-red);">Clear All Local Data</button>
+          <div style="border-top:1px solid var(--border-subtle);padding-top:16px;">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--accent-red);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Danger Zone</label>
+            <div style="display:flex;gap:8px;">
+              <button class="btn-small" id="settingsClearHistory" style="flex:1;border-color:var(--accent-orange);color:var(--accent-orange);">Clear History</button>
+              <button class="btn-small" id="settingsClearCollections" style="flex:1;border-color:var(--accent-orange);color:var(--accent-orange);">Clear Collections</button>
+              <button class="btn-small" id="settingsClearAll" style="flex:1;border-color:var(--accent-red);color:var(--accent-red);">Clear All Data</button>
             </div>
           </div>
 
-          <div style="border-top:1px solid var(--border-subtle);padding-top:8px;font-size:11px;color:var(--text-muted);">
-            Ghost Client v1.0 &middot; 100% client-side &middot; IndexedDB storage &middot; <span id="dbSize">Calculating...</span>
+          <div style="border-top:1px solid var(--border-subtle);padding-top:12px;font-size:11px;color:var(--text-muted);display:flex;justify-content:space-between;">
+            <span>Ghost Client v1.0 &middot; 100% client-side</span>
+            <span id="dbSize">Calculating...</span>
           </div>
         </div>
       `;
@@ -1039,6 +1134,19 @@
         }
       });
 
+      // Compact mode handler
+      const compactSel = body.querySelector('#settingsCompact');
+      const savedCompact = localStorage.getItem('gc-compact') === 'true';
+      compactSel.value = savedCompact ? 'true' : 'false';
+      on(compactSel, 'change', () => {
+        const isCompact = compactSel.value === 'true';
+        localStorage.setItem('gc-compact', isCompact);
+        document.body.style.fontSize = isCompact ? '11px' : '';
+        document.querySelectorAll('.url-bar, .request-tabs, .response-header').forEach(el => {
+          el.style.padding = isCompact ? '8px 12px' : '';
+        });
+      });
+
       // Font size handler
       const fsRange = body.querySelector('#settingsFontSize');
       const fsVal = body.querySelector('#fontSizeVal');
@@ -1053,18 +1161,42 @@
 
       // Sidebar width handler
       const sbWidth = body.querySelector('#settingsSidebarWidth');
-      const savedSbWidth = localStorage.getItem('gc-sidebar-width');
-      if (savedSbWidth) sbWidth.value = savedSbWidth;
+      const savedSbWidth = localStorage.getItem('gc-sidebar-width') || '260';
+      sbWidth.value = savedSbWidth;
       on(sbWidth, 'change', () => {
         const val = sbWidth.value;
         document.querySelector('.sidebar').style.width = val + 'px';
         localStorage.setItem('gc-sidebar-width', val);
       });
 
+      // Panel split handler
+      const panelSplit = body.querySelector('#settingsPanelSplit');
+      const panelSplitVal = body.querySelector('#panelSplitVal');
+      const savedSplit = localStorage.getItem('gc-panel-split') || '50';
+      panelSplit.value = savedSplit;
+      panelSplitVal.textContent = savedSplit;
+      on(panelSplit, 'input', () => {
+        const val = panelSplit.value;
+        panelSplitVal.textContent = val;
+        $('.request-section').style.flex = `0 0 ${val}%`;
+        localStorage.setItem('gc-panel-split', val);
+      });
+
+      // Font family handler
+      const ffSel = body.querySelector('#settingsFontFamily');
+      const savedFF = localStorage.getItem('gc-font-family') || 'mono';
+      ffSel.value = savedFF;
+      on(ffSel, 'change', () => {
+        const val = ffSel.value;
+        const family = val === 'mono' ? 'var(--font-mono)' : 'var(--font-sans)';
+        document.querySelectorAll('.response-body, .json-tree, .code-gen-body, .body-editor').forEach(el => { el.style.fontFamily = family; });
+        localStorage.setItem('gc-font-family', val);
+      });
+
       // Timeout handler
       const toInput = body.querySelector('#settingsTimeout');
       on(toInput, 'change', () => {
-        $('#timeoutInput').value = Math.max(1, Math.min(300, parseInt(toInput.value || '30', 10)));
+        $('#timeoutInput').value = Math.max(1, Math.min(600, parseInt(toInput.value || '30', 10)));
         localStorage.setItem('gc-timeout', $('#timeoutInput').value);
       });
 
@@ -1083,6 +1215,33 @@
       histLimit.value = savedLimit;
       on(histLimit, 'change', () => {
         localStorage.setItem('gc-history-limit', histLimit.value);
+      });
+
+      // Default body type handler
+      const defBody = body.querySelector('#settingsDefaultBody');
+      const savedBody = localStorage.getItem('gc-default-body') || 'json';
+      defBody.value = savedBody;
+      on(defBody, 'change', () => {
+        localStorage.setItem('gc-default-body', defBody.value);
+        $('#bodyType').value = defBody.value;
+      });
+
+      // Default auth handler
+      const defAuth = body.querySelector('#settingsDefaultAuth');
+      const savedAuth = localStorage.getItem('gc-default-auth') || 'none';
+      defAuth.value = savedAuth;
+      on(defAuth, 'change', () => {
+        localStorage.setItem('gc-default-auth', defAuth.value);
+        $('#authType').value = defAuth.value;
+        renderAuthFields();
+      });
+
+      // Auto-save handler
+      const autoSave = body.querySelector('#settingsAutoSave');
+      const savedAutoSave = localStorage.getItem('gc-auto-save') === 'true';
+      autoSave.checked = savedAutoSave;
+      on(autoSave, 'change', () => {
+        localStorage.setItem('gc-auto-save', autoSave.checked);
       });
 
       // Response view handler
@@ -1110,6 +1269,31 @@
         localStorage.setItem('gc-auto-format', autoFmt.checked);
       });
 
+      // Auto-expand handler
+      const autoExpand = body.querySelector('#settingsAutoExpand');
+      const savedExpand = localStorage.getItem('gc-auto-expand') === 'true';
+      autoExpand.checked = savedExpand;
+      on(autoExpand, 'change', () => {
+        localStorage.setItem('gc-auto-expand', autoExpand.checked);
+      });
+
+      // Line numbers handler
+      const lineNums = body.querySelector('#settingsLineNumbers');
+      const savedLineNums = localStorage.getItem('gc-line-numbers') === 'true';
+      lineNums.checked = savedLineNums;
+      on(lineNums, 'change', () => {
+        localStorage.setItem('gc-line-numbers', lineNums.checked);
+      });
+
+      // Word wrap handler
+      const wordWrap = body.querySelector('#settingsWordWrap');
+      const savedWrap = localStorage.getItem('gc-word-wrap') === 'true';
+      wordWrap.checked = savedWrap;
+      on(wordWrap, 'change', () => {
+        localStorage.setItem('gc-word-wrap', wordWrap.checked);
+        document.querySelectorAll('.response-body').forEach(el => { el.style.whiteSpace = wordWrap.checked ? 'pre-wrap' : 'pre'; });
+      });
+
       // Sound notification handler
       const soundNotify = body.querySelector('#settingsSoundNotify');
       const savedSound = localStorage.getItem('gc-sound-notify') === 'true';
@@ -1118,12 +1302,56 @@
         localStorage.setItem('gc-sound-notify', soundNotify.checked);
       });
 
+      // Time in ms handler
+      const timeMs = body.querySelector('#settingsTimeMs');
+      const savedTimeMs = localStorage.getItem('gc-time-ms') === 'true';
+      timeMs.checked = savedTimeMs;
+      on(timeMs, 'change', () => {
+        localStorage.setItem('gc-time-ms', timeMs.checked);
+      });
+
+      // History sort handler
+      const histSort = body.querySelector('#settingsHistorySort');
+      const savedSort = localStorage.getItem('gc-history-sort') || 'time';
+      histSort.value = savedSort;
+      on(histSort, 'change', () => {
+        localStorage.setItem('gc-history-sort', histSort.value);
+        renderHistory();
+      });
+
+      // Timestamps handler
+      const timestamps = body.querySelector('#settingsTimestamps');
+      const savedTs = localStorage.getItem('gc-timestamps') || 'relative';
+      timestamps.value = savedTs;
+      on(timestamps, 'change', () => {
+        localStorage.setItem('gc-timestamps', timestamps.value);
+        renderHistory();
+      });
+
+      // Collapse sidebar handler
+      const collapseSidebar = body.querySelector('#settingsCollapseSidebar');
+      const savedCollapse = localStorage.getItem('gc-collapse-sidebar') === 'true';
+      collapseSidebar.checked = savedCollapse;
+      on(collapseSidebar, 'change', () => {
+        localStorage.setItem('gc-collapse-sidebar', collapseSidebar.checked);
+      });
+
       // Clear history handler
       on(body.querySelector('#settingsClearHistory'), 'click', () => {
         showModal('Clear History', 'Delete all request history? This cannot be undone.', async () => {
           await dbClear('history');
           await renderHistory();
           toast('History cleared', 'info');
+        });
+      });
+
+      // Clear collections handler
+      on(body.querySelector('#settingsClearCollections'), 'click', () => {
+        showModal('Clear Collections', 'Delete all collections and saved requests? This cannot be undone.', async () => {
+          await dbClear('collections');
+          await dbClear('requests');
+          await renderCollections();
+          toast('Collections cleared', 'info');
         });
       });
 
@@ -1152,10 +1380,22 @@
       if (savedFs) document.querySelectorAll('.response-body, .json-tree, .code-gen-body').forEach(el => { el.style.fontSize = savedFs + 'px'; });
       const savedSbWidth = localStorage.getItem('gc-sidebar-width');
       if (savedSbWidth) document.querySelector('.sidebar').style.width = savedSbWidth + 'px';
+      const savedSplit = localStorage.getItem('gc-panel-split');
+      if (savedSplit) { $('.request-section').style.flex = `0 0 ${savedSplit}%`; }
+      const savedFF = localStorage.getItem('gc-font-family');
+      if (savedFF === 'sans') document.querySelectorAll('.response-body, .json-tree, .code-gen-body, .body-editor').forEach(el => { el.style.fontFamily = 'var(--font-sans)'; });
       const savedMethod = localStorage.getItem('gc-default-method');
       if (savedMethod) $('#httpMethod').value = savedMethod;
+      const savedBody = localStorage.getItem('gc-default-body');
+      if (savedBody) $('#bodyType').value = savedBody;
+      const savedAuth = localStorage.getItem('gc-default-auth');
+      if (savedAuth) { $('#authType').value = savedAuth; renderAuthFields(); }
       const savedView = localStorage.getItem('gc-res-view');
       if (savedView) $('#resFormat').value = savedView;
+      const savedCompact = localStorage.getItem('gc-compact') === 'true';
+      if (savedCompact) document.body.style.fontSize = '11px';
+      const savedWrap = localStorage.getItem('gc-word-wrap') === 'true';
+      document.querySelectorAll('.response-body').forEach(el => { el.style.whiteSpace = savedWrap ? 'pre-wrap' : 'pre'; });
     })();
 
     // Res format toggle
@@ -1168,7 +1408,11 @@
       } else if (fmt === 'preview') {
         $('#responseBody').innerHTML = `<iframe style="width:100%;height:100%;border:none;background:white;" srcdoc="${escapeHtml(text)}"></iframe>`;
       } else {
-        try { $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(text)) + '</div>'; }
+        const autoFmt = localStorage.getItem('gc-auto-format') === 'true';
+        if (autoFmt) {
+          try { text = JSON.stringify(JSON.parse(text), null, parseInt(localStorage.getItem('gc-json-indent') || '2', 10)); } catch {}
+        }
+        try { $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(text), localStorage.getItem('gc-auto-expand') === 'true') + '</div>'; }
         catch { $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(text)}</code>`; }
       }
     });
