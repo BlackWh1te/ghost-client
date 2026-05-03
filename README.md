@@ -66,17 +66,21 @@ Zero dependencies. Zero backends. Zero trust required.
 
 **7 HTTP methods.** GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS. Each one gets a color so you can scan your history at a glance.
 
-**Collapsible JSON tree.** Not pretty-printed text. A real tree you can expand and collapse, with syntax highlighting that makes strings green, numbers red, and keys blue.
+**Collapsible JSON tree.** Not pretty-printed text. A real tree you can expand and collapse, with syntax highlighting that makes strings green, numbers red, and keys blue. Search results highlight right in the tree.
 
 **Environment variables.** Write `{{baseUrl}}` or `{{apiKey}}` anywhere. Switch environments and every request updates instantly. No find-and-replace.
 
-**Collections.** Save requests into named folders. Never lose that carefully crafted GraphQL mutation again.
+**Collections.** Save requests into named folders. Duplicate, rename, or delete individual requests. Never lose that carefully crafted GraphQL mutation again.
 
-**History.** Every request you send is logged. One click replays it exactly. Last 100 only — this isn't a surveillance tool.
+**History.** Every request you send is logged. One click replays it exactly. Filter by method, URL, or status code. Last 100 only — this isn't a surveillance tool.
 
 **Auth that actually helps.** Bearer token, Basic auth, API key (header or query param). No digging through docs to remember the header format.
 
 **Settings that stay set.** 20+ configurable options: theme (light/dark/system), font size, sidebar width, JSON indent, history retention, timeout defaults, and more. All persist to localStorage.
+
+**Keyboard shortcuts.** Ctrl+Enter to send, Ctrl+S to save, Ctrl+K to focus the URL bar, Ctrl+/ to toggle theme, Ctrl+1-4 for sidebar tabs.
+
+**Error recovery.** Failed requests show a beautiful error panel with a one-click retry button. No more copying and pasting after a timeout.
 
 ---
 
@@ -86,14 +90,15 @@ Ghost Client isn't just a request sender. It ships with utilities that developer
 
 | Tool | Use it when |
 |:---|:---|
-| **Code Generator** | You need to paste a working cURL, Fetch, Axios, or Python snippet into a PR |
+| **Code Generator** | You need a snippet in cURL, Fetch, Axios, Python, Ruby, Go, or PHP |
 | **cURL Import** | Stack Overflow gives you a `curl` command and you need to break it into parts |
-| **JWT Decoder** | You're debugging auth and need to see the payload without leaving the app |
+| **cURL Export** | You need to share or debug a request as a curl command |
+| **JWT Decoder** | You're debugging auth and need to see the header, payload, and expiration status |
 | **Base64** | You're handling basic auth headers or image data URIs |
 | **URL Encode/Decode** | You're building query strings by hand |
 | **JSON Diff** | You have "before" and "after" API responses and need to see what changed |
-| **Collection Runner** | You want to smoke-test every endpoint without clicking 47 times |
-| **Response Search** | The API returns 4000 lines and you need one key |
+| **Collection Runner** | You want to smoke-test every endpoint — sequential or parallel |
+| **Response Search** | The API returns 4000 lines and you need one key (with regex and case options) |
 
 ---
 
