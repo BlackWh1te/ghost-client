@@ -181,6 +181,32 @@
     } catch { return text; }
   }
 
+  function formatGraphQL(query) {
+    // Simple GraphQL formatter - adds proper indentation
+    let formatted = query.trim();
+    let indent = 0;
+    const result = [];
+    const tokens = formatted.split(/([\{\}\(\)\[\]])/);
+
+    for (let i = 0; i < tokens.length; i++) {
+      const token = tokens[i].trim();
+      if (!token) continue;
+
+      if (token === '{' || token === '(' || token === '[') {
+        result.push(token);
+        indent += 2;
+        result.push('\n' + ' '.repeat(indent));
+      } else if (token === '}' || token === ')' || token === ']') {
+        indent -= 2;
+        result.push('\n' + ' '.repeat(indent) + token);
+      } else {
+        result.push(token);
+      }
+    }
+
+    return result.join('').replace(/\n\s*\n/g, '\n');
+  }
+
   // ===== Tab Switching =====
   function initTabs(tabSelector, panelPrefix, activeClass = 'active') {
     on(document, 'click', (e) => {
@@ -280,6 +306,22 @@
         body = substituteEnv(rawBody);
         if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
       }
+    } else if (bodyType === 'graphql') {
+      const query = substituteEnv($('#graphqlQuery').value.trim());
+      let variables = {};
+      const variablesStr = $('#graphqlVariables').value.trim();
+      if (variablesStr) {
+        try {
+          variables = JSON.parse(substituteEnv(variablesStr));
+        } catch (e) {
+          toast('Invalid GraphQL variables JSON', 'error');
+          return;
+        }
+      }
+      if (query) {
+        body = JSON.stringify({ query, variables });
+        if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
+      }
     } else if (bodyType === 'form') {
       // For form data we'd use FormData, keeping simple for now
       body = $('#bodyEditor').value;
@@ -367,12 +409,22 @@
 
       // Save to history
       if (localStorage.getItem('gc-auto-save') !== 'false') {
+        let bodyData = null;
+        if (bodyType === 'graphql') {
+          bodyData = {
+            query: $('#graphqlQuery').value,
+            variables: $('#graphqlVariables').value
+          };
+        } else if (bodyType !== 'none') {
+          bodyData = $('#bodyEditor').value;
+        }
+
         await saveHistory({
         method,
         url: rawUrl,
         headers: getKvData($('#headersList')),
         params,
-        body: bodyType === 'none' ? null : $('#bodyEditor').value,
+        body: bodyData,
         bodyType,
         authType,
         authConfig: getAuthConfig(),
@@ -559,7 +611,21 @@
     setKvData($('#headersList'), item.headers || {});
     setKvData($('#paramsList'), item.params || {});
     $('#bodyType').value = item.bodyType || 'none';
-    $('#bodyEditor').value = item.body || '';
+
+    // Handle body restoration
+    if (item.bodyType === 'graphql' && item.body && typeof item.body === 'object') {
+      $('#graphqlQuery').value = item.body.query || '';
+      $('#graphqlVariables').value = item.body.variables || '{}';
+      // Trigger body type change to show GraphQL editor
+      $('#bodyType').dispatchEvent(new Event('change'));
+    } else {
+      $('#bodyEditor').value = item.body || '';
+      // Ensure regular editor is shown
+      if (item.bodyType === 'graphql') {
+        $('#bodyType').value = 'json'; // Fallback to JSON if data is malformed
+      }
+    }
+
     setAuthConfig(item.authConfig || { type: 'none' });
   }
 
@@ -647,6 +713,19 @@
     showModal('Save to Collection', modalBody, async () => {
       const name = $('#reqNameInput').value.trim();
       if (!name) return;
+
+      // Handle body data based on type
+      let bodyData = null;
+      const bodyType = $('#bodyType').value;
+      if (bodyType === 'graphql') {
+        bodyData = {
+          query: $('#graphqlQuery').value,
+          variables: $('#graphqlVariables').value
+        };
+      } else if (bodyType !== 'none') {
+        bodyData = $('#bodyEditor').value;
+      }
+
       const req = {
         name,
         collectionId: collId,
@@ -654,8 +733,8 @@
         url: $('#requestUrl').value,
         headers: getKvData($('#headersList')),
         params: getKvData($('#paramsList')),
-        bodyType: $('#bodyType').value,
-        body: $('#bodyEditor').value,
+        bodyType,
+        body: bodyData,
         authConfig: getAuthConfig(),
         timestamp: Date.now(),
       };
@@ -671,7 +750,21 @@
     setKvData($('#headersList'), req.headers || {});
     setKvData($('#paramsList'), req.params || {});
     $('#bodyType').value = req.bodyType || 'none';
-    $('#bodyEditor').value = req.body || '';
+
+    // Handle body restoration
+    if (req.bodyType === 'graphql' && req.body && typeof req.body === 'object') {
+      $('#graphqlQuery').value = req.body.query || '';
+      $('#graphqlVariables').value = req.body.variables || '{}';
+      // Trigger body type change to show GraphQL editor
+      $('#bodyType').dispatchEvent(new Event('change'));
+    } else {
+      $('#bodyEditor').value = req.body || '';
+      // Ensure regular editor is shown
+      if (req.bodyType === 'graphql') {
+        $('#bodyType').value = 'json'; // Fallback to JSON if data is malformed
+      }
+    }
+
     setAuthConfig(req.authConfig || { type: 'none' });
   }
 
@@ -844,6 +937,32 @@
         $('#bodyEditor').value = JSON.stringify(JSON.parse($('#bodyEditor').value), null, 2);
       } catch { toast('Invalid JSON', 'error'); }
     });
+
+    // Body type switching
+    on($('#bodyType'), 'change', () => {
+      const type = $('#bodyType').value;
+      if (type === 'graphql') {
+        $('#bodyEditor').style.display = 'none';
+        $('#graphqlEditor').style.display = 'flex';
+        $('#formatJsonBtn').style.display = 'none';
+      } else {
+        $('#bodyEditor').style.display = 'block';
+        $('#graphqlEditor').style.display = 'none';
+        $('#formatJsonBtn').style.display = 'inline-block';
+      }
+    });
+
+    // GraphQL format button
+    on($('#formatGraphqlBtn'), 'click', () => {
+      try {
+        $('#graphqlQuery').value = formatGraphQL($('#graphqlQuery').value);
+        try {
+          $('#graphqlVariables').value = JSON.stringify(JSON.parse($('#graphqlVariables').value), null, 2);
+        } catch { /* Variables might be empty, that's ok */ }
+        toast('GraphQL formatted', 'success');
+      } catch { toast('Error formatting GraphQL', 'error'); }
+    });
+
     on($('#authType'), 'change', renderAuthFields);
 
     on($('#newCollectionBtn'), 'click', () => {
@@ -1422,7 +1541,17 @@
       const method = $('#httpMethod').value;
       const url = $('#requestUrl').value.trim();
       const headers = getKvData($('#headersList'));
-      const body = $('#bodyType').value !== 'none' ? $('#bodyEditor').value.trim() : null;
+      const bodyType = $('#bodyType').value;
+      let body = null;
+      if (bodyType === 'graphql') {
+        const query = $('#graphqlQuery').value.trim();
+        const variables = $('#graphqlVariables').value.trim();
+        if (query) {
+          body = JSON.stringify({ query, variables: variables ? JSON.parse(variables) : {} });
+        }
+      } else if (bodyType !== 'none') {
+        body = $('#bodyEditor').value.trim();
+      }
       const authType = $('#authType').value;
 
       const modalBody = document.createElement('div');

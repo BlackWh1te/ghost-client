@@ -193,6 +193,7 @@
               <select id="bodyType">
                 <option value="none">None</option>
                 <option value="json" selected>JSON</option>
+                <option value="graphql">GraphQL</option>
                 <option value="form">Form Data</option>
                 <option value="text">Plain Text</option>
                 <option value="raw">Raw</option>
@@ -200,6 +201,17 @@
               <button class="btn-small" id="formatJsonBtn">Format JSON</button>
             </div>
             <textarea id="bodyEditor" class="body-editor" placeholder='{"key": "value"}' spellcheck="false">{}</textarea>
+            <div id="graphqlEditor" class="graphql-editor" style="display:none">
+              <div class="graphql-query-section">
+                <label class="graphql-label">Query</label>
+                <textarea id="graphqlQuery" class="graphql-textarea" placeholder="query { ... }" spellcheck="false"></textarea>
+              </div>
+              <div class="graphql-variables-section">
+                <label class="graphql-label">Variables (JSON)</label>
+                <textarea id="graphqlVariables" class="graphql-textarea" placeholder='{"key": "value"}' spellcheck="false">{}</textarea>
+              </div>
+              <button class="btn-small" id="formatGraphqlBtn" style="margin-top:8px">Format GraphQL</button>
+            </div>
           </div>
 
           <div class="request-panel" id="req-auth">

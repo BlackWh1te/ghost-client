@@ -589,6 +589,49 @@ html, body {
 
 .body-editor:focus { border-color: var(--border-focus); }
 
+/* GraphQL Editor */
+.graphql-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+}
+
+.graphql-query-section,
+.graphql-variables-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+}
+
+.graphql-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.graphql-textarea {
+  flex: 1;
+  min-height: 120px;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  outline: none;
+  resize: vertical;
+  transition: border-color var(--transition-fast);
+  tab-size: 2;
+}
+
+.graphql-textarea:focus { border-color: var(--border-focus); }
+
 /* Auth */
 .auth-select {
   width: 100%;
