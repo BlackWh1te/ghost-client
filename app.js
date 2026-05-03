@@ -356,7 +356,8 @@
       const contentType = response.headers.get('content-type') || '';
       let formatted = responseText;
       if (contentType.includes('json')) {
-        try { formatted = JSON.stringify(JSON.parse(responseText), null, 2); } catch {}
+        const indent = localStorage.getItem('gc-json-indent') === '4' ? 4 : 2;
+        try { formatted = JSON.stringify(JSON.parse(responseText), null, indent); } catch {}
       }
 
       $('#responseBody').innerHTML = '<div class="json-tree">' + renderJsonTree(JSON.parse(responseText)) + '</div>';
@@ -379,6 +380,22 @@
       await renderHistory();
 
       toast(`Response received: ${code} in ${elapsed}ms`, code < 300 ? 'success' : 'info');
+
+      // Sound notification
+      if (localStorage.getItem('gc-sound-notify') === 'true') {
+        try {
+          const ctx = new (window.AudioContext || window.webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.frequency.value = code < 300 ? 800 : 400;
+          gain.gain.value = 0.1;
+          osc.start();
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+          osc.stop(ctx.currentTime + 0.1);
+        } catch {}
+      }
     } catch (err) {
       $('#statusCode').textContent = 'ERR';
       $('#statusCode').className = 'status-code error';
@@ -499,8 +516,9 @@
 
   // ===== History =====
   async function saveHistory(entry) {
+    const limit = parseInt(localStorage.getItem('gc-history-limit') || '100', 10);
     const all = await dbGet('history');
-    if (all.length >= 100) {
+    if (all.length >= limit) {
       const oldest = all.sort((a, b) => a.timestamp - b.timestamp)[0];
       await dbDelete('history', oldest.id);
     }
@@ -896,35 +914,116 @@
     on($('#settingsBtn'), 'click', () => {
       const body = document.createElement('div');
       body.innerHTML = `
-        <div style="display:flex;flex-direction:column;gap:16px;">
+        <div style="display:flex;flex-direction:column;gap:16px;max-height:500px;overflow-y:auto;padding-right:8px;">
           <div>
-            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Theme</label>
-            <select id="settingsTheme" style="width:100%;padding:6px 10px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
-              <option value="system">System</option>
-              <option value="dark">Dark</option>
-              <option value="light">Light</option>
-            </select>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Appearance</label>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <label style="flex:1;font-size:12px;">Theme</label>
+                <select id="settingsTheme" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="system">System</option>
+                  <option value="dark">Dark</option>
+                  <option value="light">Light</option>
+                </select>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <label style="flex:1;font-size:12px;">Response Font Size</label>
+                <input type="range" id="settingsFontSize" min="10" max="18" value="12" style="flex:1;accent-color:var(--accent-indigo);">
+                <span id="fontSizeVal" style="width:30px;font-size:11px;color:var(--text-tertiary);text-align:center">12</span>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <label style="flex:1;font-size:12px;">Sidebar Width</label>
+                <select id="settingsSidebarWidth" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="220">Narrow (220px)</option>
+                  <option value="260">Default (260px)</option>
+                  <option value="300">Wide (300px)</option>
+                </select>
+              </div>
+            </div>
           </div>
+
           <div>
-            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Default Timeout (seconds)</label>
-            <input type="number" id="settingsTimeout" value="${$('#timeoutInput').value}" min="1" max="300" style="width:100%;padding:6px 10px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;font-family:var(--font-mono);">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Requests</label>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <label style="flex:1;font-size:12px;">Default Timeout (s)</label>
+                <input type="number" id="settingsTimeout" value="${$('#timeoutInput').value}" min="1" max="300" style="width:60px;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;font-family:var(--font-mono);">
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <label style="flex:1;font-size:12px;">Default HTTP Method</label>
+                <select id="settingsDefaultMethod" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="PATCH">PATCH</option>
+                  <option value="DELETE">DELETE</option>
+                </select>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <label style="flex:1;font-size:12px;">History Retention</label>
+                <select id="settingsHistoryLimit" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="50">50 requests</option>
+                  <option value="100">100 requests</option>
+                  <option value="200">200 requests</option>
+                  <option value="500">500 requests</option>
+                </select>
+              </div>
+            </div>
           </div>
+
           <div>
-            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Response Font Size</label>
-            <input type="range" id="settingsFontSize" min="10" max="18" value="12" style="width:100%;accent-color:var(--accent-indigo);">
-            <div style="text-align:center;font-size:11px;color:var(--text-tertiary);margin-top:2px"><span id="fontSizeVal">12</span>px</div>
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Responses</label>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <div style="display:flex;align-items:center;gap:8px;">
+                <label style="flex:1;font-size:12px;">Default View</label>
+                <select id="settingsResView" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="pretty">Pretty</option>
+                  <option value="raw">Raw</option>
+                </select>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <label style="flex:1;font-size:12px;">JSON Indent Size</label>
+                <select id="settingsJsonIndent" style="flex:1;padding:4px 8px;font-size:12px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;cursor:pointer;">
+                  <option value="2">2 spaces</option>
+                  <option value="4">4 spaces</option>
+                </select>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" id="settingsAutoFormat" style="accent-color:var(--accent-indigo);">
+                <label for="settingsAutoFormat" style="flex:1;font-size:12px;cursor:pointer;">Auto-format JSON responses</label>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;">
+                <input type="checkbox" id="settingsSoundNotify" style="accent-color:var(--accent-indigo);">
+                <label for="settingsSoundNotify" style="flex:1;font-size:12px;cursor:pointer;">Sound notification on request</label>
+              </div>
+            </div>
           </div>
+
           <div style="border-top:1px solid var(--border-subtle);padding-top:12px;">
             <label style="display:block;font-size:11px;font-weight:600;color:var(--accent-red);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:6px">Danger Zone</label>
-            <button class="btn-small" id="settingsClearAll" style="width:100%;border-color:var(--accent-red);color:var(--accent-red);">Clear All Local Data</button>
+            <div style="display:flex;flex-direction:column;gap:8px;">
+              <button class="btn-small" id="settingsClearHistory" style="width:100%;border-color:var(--accent-orange);color:var(--accent-orange);">Clear History Only</button>
+              <button class="btn-small" id="settingsClearAll" style="width:100%;border-color:var(--accent-red);color:var(--accent-red);">Clear All Local Data</button>
+            </div>
           </div>
+
           <div style="border-top:1px solid var(--border-subtle);padding-top:8px;font-size:11px;color:var(--text-muted);">
-            Ghost Client v1.0 &middot; 100% client-side &middot; IndexedDB storage
+            Ghost Client v1.0 &middot; 100% client-side &middot; IndexedDB storage &middot; <span id="dbSize">Calculating...</span>
           </div>
         </div>
       `;
 
       showModal('Settings', body);
+
+      // Calculate DB size
+      if (navigator.storage && navigator.storage.estimate) {
+        navigator.storage.estimate().then(estimate => {
+          const usage = (estimate.usage / 1024 / 1024).toFixed(2);
+          document.getElementById('dbSize').textContent = usage + ' MB used';
+        }).catch(() => {
+          document.getElementById('dbSize').textContent = 'Size unavailable';
+        });
+      }
 
       // Theme handler
       const themeSel = body.querySelector('#settingsTheme');
@@ -940,13 +1039,6 @@
         }
       });
 
-      // Timeout handler
-      const toInput = body.querySelector('#settingsTimeout');
-      on(toInput, 'change', () => {
-        $('#timeoutInput').value = Math.max(1, Math.min(300, parseInt(toInput.value || '30', 10)));
-        localStorage.setItem('gc-timeout', $('#timeoutInput').value);
-      });
-
       // Font size handler
       const fsRange = body.querySelector('#settingsFontSize');
       const fsVal = body.querySelector('#fontSizeVal');
@@ -957,6 +1049,82 @@
         fsVal.textContent = val;
         document.querySelectorAll('.response-body, .json-tree, .code-gen-body').forEach(el => { el.style.fontSize = val + 'px'; });
         localStorage.setItem('gc-fontsize', val);
+      });
+
+      // Sidebar width handler
+      const sbWidth = body.querySelector('#settingsSidebarWidth');
+      const savedSbWidth = localStorage.getItem('gc-sidebar-width');
+      if (savedSbWidth) sbWidth.value = savedSbWidth;
+      on(sbWidth, 'change', () => {
+        const val = sbWidth.value;
+        document.querySelector('.sidebar').style.width = val + 'px';
+        localStorage.setItem('gc-sidebar-width', val);
+      });
+
+      // Timeout handler
+      const toInput = body.querySelector('#settingsTimeout');
+      on(toInput, 'change', () => {
+        $('#timeoutInput').value = Math.max(1, Math.min(300, parseInt(toInput.value || '30', 10)));
+        localStorage.setItem('gc-timeout', $('#timeoutInput').value);
+      });
+
+      // Default method handler
+      const defMethod = body.querySelector('#settingsDefaultMethod');
+      const savedMethod = localStorage.getItem('gc-default-method') || 'GET';
+      defMethod.value = savedMethod;
+      on(defMethod, 'change', () => {
+        localStorage.setItem('gc-default-method', defMethod.value);
+        $('#httpMethod').value = defMethod.value;
+      });
+
+      // History limit handler
+      const histLimit = body.querySelector('#settingsHistoryLimit');
+      const savedLimit = localStorage.getItem('gc-history-limit') || '100';
+      histLimit.value = savedLimit;
+      on(histLimit, 'change', () => {
+        localStorage.setItem('gc-history-limit', histLimit.value);
+      });
+
+      // Response view handler
+      const resView = body.querySelector('#settingsResView');
+      const savedView = localStorage.getItem('gc-res-view') || 'pretty';
+      resView.value = savedView;
+      on(resView, 'change', () => {
+        localStorage.setItem('gc-res-view', resView.value);
+        $('#resFormat').value = resView.value;
+      });
+
+      // JSON indent handler
+      const jsonIndent = body.querySelector('#settingsJsonIndent');
+      const savedIndent = localStorage.getItem('gc-json-indent') || '2';
+      jsonIndent.value = savedIndent;
+      on(jsonIndent, 'change', () => {
+        localStorage.setItem('gc-json-indent', jsonIndent.value);
+      });
+
+      // Auto-format handler
+      const autoFmt = body.querySelector('#settingsAutoFormat');
+      const savedAutoFmt = localStorage.getItem('gc-auto-format') === 'true';
+      autoFmt.checked = savedAutoFmt;
+      on(autoFmt, 'change', () => {
+        localStorage.setItem('gc-auto-format', autoFmt.checked);
+      });
+
+      // Sound notification handler
+      const soundNotify = body.querySelector('#settingsSoundNotify');
+      const savedSound = localStorage.getItem('gc-sound-notify') === 'true';
+      soundNotify.checked = savedSound;
+      on(soundNotify, 'change', () => {
+        localStorage.setItem('gc-sound-notify', soundNotify.checked);
+      });
+
+      // Clear history handler
+      on(body.querySelector('#settingsClearHistory'), 'click', () => {
+        showModal('Clear History', 'Delete all request history? This cannot be undone.', async () => {
+          await dbClear('history');
+          await renderHistory();
+          toast('History cleared', 'info');
+        });
       });
 
       // Clear all data handler
@@ -982,6 +1150,12 @@
       if (savedTimeout) $('#timeoutInput').value = savedTimeout;
       const savedFs = localStorage.getItem('gc-fontsize');
       if (savedFs) document.querySelectorAll('.response-body, .json-tree, .code-gen-body').forEach(el => { el.style.fontSize = savedFs + 'px'; });
+      const savedSbWidth = localStorage.getItem('gc-sidebar-width');
+      if (savedSbWidth) document.querySelector('.sidebar').style.width = savedSbWidth + 'px';
+      const savedMethod = localStorage.getItem('gc-default-method');
+      if (savedMethod) $('#httpMethod').value = savedMethod;
+      const savedView = localStorage.getItem('gc-res-view');
+      if (savedView) $('#resFormat').value = savedView;
     })();
 
     // Res format toggle
