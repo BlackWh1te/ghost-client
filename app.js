@@ -1,4 +1,9 @@
-/* Ghost Client — Privacy-First API Client */
+/*
+ * Ghost Client — Privacy-First API Client
+ * Copyright (c) 2025 BlackWh1te
+ * Licensed under the MIT License.
+ * See LICENSE file for details.
+ */
 
 (function() {
   'use strict';

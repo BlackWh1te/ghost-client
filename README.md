@@ -2,12 +2,12 @@
 
 > A privacy-first, zero-backend API client that runs entirely in your browser.
 
-[![Stars](https://img.shields.io/github/stars/yourname/ghost-client?style=social)](https://github.com/yourname/ghost-client)
+[![Stars](https://img.shields.io/github/stars/BlackWh1te/ghost-client?style=social)](https://github.com/BlackWh1te/ghost-client)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **No telemetry. No cloud. No account.** Your API keys, collections, and request history never leave your machine. Everything is stored locally via IndexedDB.
 
-[Live Demo](https://yourname.github.io/ghost-client) · [Features](#features) · [Screenshots](#screenshots)
+[Live Demo](https://BlackWh1te.github.io/ghost-client) · [Features](#features) · [Screenshots](#screenshots)
 
 ---
 
@@ -49,7 +49,7 @@ Open `index.html` in any modern browser, or visit the live demo.
 ### Deploy to GitHub Pages
 
 ```bash
-git clone https://github.com/yourname/ghost-client.git
+git clone https://github.com/BlackWh1te/ghost-client.git
 cd ghost-client
 git push origin main
 # Then enable GitHub Pages in repo settings
@@ -118,4 +118,4 @@ Issues and PRs welcome. This is intentionally a small, focused tool — we won't
 
 ## License
 
-MIT © [Your Name](https://github.com/yourname)
+MIT © [BlackWh1te](https://github.com/BlackWh1te)
