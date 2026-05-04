@@ -99,6 +99,13 @@ Ghost Client isn't just a request sender. It ships with utilities that developer
 | **JSON Diff** | You have "before" and "after" API responses and need to see what changed |
 | **Collection Runner** | You want to smoke-test every endpoint — sequential or parallel |
 | **Response Search** | The API returns 4000 lines and you need one key (with regex and case options) |
+| **Timestamp Converter** | Unix timestamp, ISO date, local time, relative — all at once |
+| **Hash Generator** | MD5 / SHA-1 / SHA-256 / SHA-512 of any text |
+| **UUID Generator** | v4 UUIDs in batches of 1, 5, or 10 |
+| **WebSocket Client** | Real-time messaging with connect/send/receive log |
+| **Server-Sent Events** | Stream and inspect live event feeds |
+| **HAR Import/Export** | Exchange requests with browser DevTools |
+| **Cookie Jar** | Manual cookie storage and auto-injection per domain |
 
 ---
 
@@ -177,19 +184,43 @@ Your data is yours. Your tools should be too.
 
 ## roadmap
 
-- [x] Code generator (cURL / Fetch / Axios / Python)
-- [x] cURL import
-- [x] JWT decoder
+### shipped
+
+- [x] Code generator (cURL / Fetch / Axios / Python / Ruby / Go / PHP)
+- [x] cURL import & export
+- [x] JWT decoder with expiration status
 - [x] Base64 & URL utilities
 - [x] JSON diff
-- [x] Collection runner
-- [x] Response search
-- [x] 20+ settings (appearance, requests, responses, history)
-- [ ] WebSocket support
-- [ ] Response assertions / mini test runner
-- [ ] Cookie jar visualization
-- [ ] OAuth2 helper flow
-- [ ] HAR import/export
+- [x] Collection runner (sequential + parallel)
+- [x] Response search (case-sensitive, regex)
+- [x] 20+ settings with persistence
+- [x] Timestamp converter (Unix / ISO / local / relative)
+- [x] Hash generator (MD5, SHA-1, SHA-256, SHA-512)
+- [x] UUID generator (v4)
+- [x] WebSocket client with message log
+- [x] Server-Sent Events (SSE) client
+- [x] Response assertions / mini test runner
+- [x] Cookie jar visualization with auto-injection
+- [x] OAuth2 PKCE helper flow
+- [x] HAR import/export (DevTools compatible)
+- [x] Collection search & nested folders
+- [x] Per-collection JSON export/import
+- [x] Request notes
+- [x] Request chaining (sequential collection runner)
+- [x] PWA support (offline-capable, installable)
+- [x] Offline indicator
+- [x] Download progress bars
+- [x] Multiple request tabs with persistence
+- [x] Secure note storage
+- [x] Data Vault — AES-256-GCM local encryption
+
+### pending
+
+- [ ] Response schema validation (JSON Schema)
+- [ ] Request/response diff side-by-side
+- [ ] Request templates/snippets
+- [ ] Custom pre/post request scripts
+- [ ] Bandwidth / latency simulation
 
 Want something else? Open an issue. But remember: the answer to "can it do cloud sync?" is **no**. Forever.
 

@@ -10,7 +10,7 @@
 
   // ===== IndexedDB =====
   const DB_NAME = 'GhostClient';
-  const DB_VERSION = 3;
+  const DB_VERSION = 4;
 
   let db = null;
 
@@ -27,6 +27,7 @@
         if (!d.objectStoreNames.contains('environments')) d.createObjectStore('environments', { keyPath: 'id', autoIncrement: true });
         if (!d.objectStoreNames.contains('cookies')) d.createObjectStore('cookies', { keyPath: 'id', autoIncrement: true });
         if (!d.objectStoreNames.contains('notes')) d.createObjectStore('notes', { keyPath: 'id', autoIncrement: true });
+        if (!d.objectStoreNames.contains('vault')) d.createObjectStore('vault', { keyPath: 'id' });
       };
     });
   }
@@ -69,6 +70,74 @@
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
+  }
+
+  // ===== Encryption Helpers (Data at Rest) =====
+  async function deriveKey(password, salt) {
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+    return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: 100000, hash: 'SHA-256' }, keyMaterial, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  }
+
+  async function encryptData(password, data) {
+    const salt = crypto.getRandomValues(new Uint8Array(16));
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const key = await deriveKey(password, salt);
+    const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(JSON.stringify(data)));
+    return { salt: Array.from(salt), iv: Array.from(iv), data: Array.from(new Uint8Array(ciphertext)) };
+  }
+
+  async function decryptData(password, encrypted) {
+    const salt = new Uint8Array(encrypted.salt);
+    const iv = new Uint8Array(encrypted.iv);
+    const ciphertext = new Uint8Array(encrypted.data);
+    const key = await deriveKey(password, salt);
+    const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+    return JSON.parse(new TextDecoder().decode(decrypted));
+  }
+
+  async function lockVault(password) {
+    const payload = {
+      collections: await dbGet('collections'),
+      requests: await dbGet('requests'),
+      history: await dbGet('history'),
+      environments: await dbGet('environments'),
+      cookies: await dbGet('cookies'),
+      notes: await dbGet('notes'),
+    };
+    const encrypted = await encryptData(password, payload);
+    await dbClear('collections');
+    await dbClear('requests');
+    await dbClear('history');
+    await dbClear('environments');
+    await dbClear('cookies');
+    await dbClear('notes');
+    await dbPut('vault', { id: 1, encrypted, lockedAt: new Date().toISOString() });
+    localStorage.setItem('gc-vault-locked', 'true');
+    await renderCollections();
+    await renderHistory();
+    await renderEnvironments();
+    await renderNotes();
+    renderCookieJarList();
+  }
+
+  async function unlockVault(password) {
+    const vault = await dbGet('vault', 1);
+    if (!vault) throw new Error('No vault found');
+    const data = await decryptData(password, vault.encrypted);
+    for (const c of (data.collections || [])) { c.id = undefined; await dbPut('collections', c); }
+    for (const r of (data.requests || [])) { r.id = undefined; await dbPut('requests', r); }
+    for (const h of (data.history || [])) { h.id = undefined; await dbPut('history', h); }
+    for (const e of (data.environments || [])) { e.id = undefined; await dbPut('environments', e); }
+    for (const c of (data.cookies || [])) { c.id = undefined; await dbPut('cookies', c); }
+    for (const n of (data.notes || [])) { n.id = undefined; await dbPut('notes', n); }
+    await dbDelete('vault', 1);
+    localStorage.removeItem('gc-vault-locked');
+    await renderCollections();
+    await renderHistory();
+    await renderEnvironments();
+    await renderNotes();
+    renderCookieJarList();
   }
 
   // ===== Cookie Helpers =====
@@ -2058,6 +2127,15 @@
           </div>
 
           <div style="border-top:1px solid var(--border-subtle);padding-top:16px;">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--accent-indigo);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Data Vault (AES-256-GCM)</label>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px;">Encrypt all IndexedDB data with a password. Data is unrecoverable without the password.</div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn-small" id="settingsLockVault" style="flex:1;border-color:var(--accent-indigo);color:var(--accent-indigo);">Lock Vault</button>
+              <button class="btn-small" id="settingsUnlockVault" style="flex:1;border-color:var(--accent-green);color:var(--accent-green);display:none;">Unlock Vault</button>
+            </div>
+          </div>
+
+          <div style="border-top:1px solid var(--border-subtle);padding-top:16px;">
             <label style="display:block;font-size:11px;font-weight:600;color:var(--accent-red);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Danger Zone</label>
             <div style="display:flex;gap:8px;">
               <button class="btn-small" id="settingsClearHistory" style="flex:1;border-color:var(--accent-orange);color:var(--accent-orange);">Clear History</button>
@@ -2344,6 +2422,44 @@
           await renderEnvironments();
           await renderNotes();
           toast('All data cleared', 'info');
+        });
+      });
+
+      // Vault handlers
+      const lockBtn = body.querySelector('#settingsLockVault');
+      const unlockBtn = body.querySelector('#settingsUnlockVault');
+      if (localStorage.getItem('gc-vault-locked') === 'true') {
+        if (lockBtn) lockBtn.style.display = 'none';
+        if (unlockBtn) unlockBtn.style.display = 'inline-block';
+      }
+      on(lockBtn, 'click', () => {
+        const pwd = prompt('Set a vault password. WARNING: Data is unrecoverable without this password.\n\nEnter password:');
+        if (!pwd) return;
+        const confirm = prompt('Confirm password:');
+        if (pwd !== confirm) { toast('Passwords do not match', 'error'); return; }
+        showModal('Lock Vault', 'This will encrypt all collections, requests, history, environments, cookies, and notes. Original data will be wiped. Continue?', async () => {
+          try {
+            await lockVault(pwd);
+            lockBtn.style.display = 'none';
+            unlockBtn.style.display = 'inline-block';
+            toast('Vault locked. All data encrypted.', 'success');
+          } catch (err) {
+            toast('Lock failed: ' + err.message, 'error');
+          }
+        });
+      });
+      on(unlockBtn, 'click', () => {
+        const pwd = prompt('Enter vault password:');
+        if (!pwd) return;
+        showModal('Unlock Vault', 'This will decrypt and restore all data. Continue?', async () => {
+          try {
+            await unlockVault(pwd);
+            lockBtn.style.display = 'inline-block';
+            unlockBtn.style.display = 'none';
+            toast('Vault unlocked. Data restored.', 'success');
+          } catch (err) {
+            toast('Unlock failed: ' + err.message, 'error');
+          }
         });
       });
     });
@@ -3259,6 +3375,23 @@
 
     // Init auth fields
     renderAuthFields();
+
+    // Check for locked vault
+    if (localStorage.getItem('gc-vault-locked') === 'true') {
+      const vault = await dbGet('vault', 1);
+      if (vault) {
+        showModal('Vault Locked', '<div style="color:var(--text-tertiary);">All data is encrypted in the vault. Enter your password to unlock.</div>', async () => {
+          const pwd = prompt('Enter vault password:');
+          if (!pwd) return;
+          try {
+            await unlockVault(pwd);
+            toast('Vault unlocked. Welcome back.', 'success');
+          } catch (err) {
+            toast('Unlock failed: ' + err.message, 'error');
+          }
+        });
+      }
+    }
 
     // Render data
     await renderCollections();
