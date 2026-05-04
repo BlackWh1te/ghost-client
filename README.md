@@ -76,9 +76,27 @@ Zero dependencies. Zero backends. Zero trust required.
 
 **Auth that actually helps.** Bearer token, Basic auth, API key (header or query param). No digging through docs to remember the header format.
 
-**Settings that stay set.** 20+ configurable options: theme (light/dark/system), font size, sidebar width, JSON indent, history retention, timeout defaults, and more. All persist to localStorage.
+**Settings that stay set.** 25+ configurable options: theme (light/dark/system), font size, sidebar width, JSON indent, history retention, timeout defaults, body type, auth type, auto-save, sound notifications, word wrap, line numbers, and more. All persist to localStorage.
 
 **Keyboard shortcuts.** Ctrl+Enter to send, Ctrl+S to save, Ctrl+K to focus the URL bar, Ctrl+/ to toggle theme, Ctrl+1-4 for sidebar tabs.
+
+**Request templates.** One-click load common patterns — REST GET/POST/PUT/PATCH/DELETE, GraphQL query, auth login, file upload. Stop typing the same JSON body over and over.
+
+**Pre/post request scripts.** Write JavaScript that runs before or after every request. Set environment variables dynamically, validate response shape, extract tokens for chaining. `pm.environment.set()`, `pm.response.json()`, `pm.expect().to.equal()`.
+
+**Network throttle simulation.** Test how your API feels on Slow 3G, Fast 3G, or Slow 4G. No extra tools needed.
+
+**JSON minimap.** When the API dumps 10,000 lines, a 2px structural overview appears in the sidebar so you can navigate without losing your place.
+
+**Request tags.** Label saved requests as `production`, `staging`, `dev`, `broken`, or `wip`. Scan your collection at a glance.
+
+**Drag-and-drop reordering.** Reorganize requests within collections by dragging. No more delete-and-recreate.
+
+**Schema validation.** Paste a JSON Schema and validate the last response against it. Catches API contract drift before your frontend does.
+
+**Side-by-side diff.** Compare two JSON responses directly in the app. No external diff tool required.
+
+**Complete backup & restore.** Export every collection, request, history entry, environment, note, cookie, setting, and vault as a single JSON file. Restore on any machine in one click.
 
 **Error recovery.** Failed requests show a beautiful error panel with a one-click retry button. No more copying and pasting after a timeout.
 
@@ -106,6 +124,15 @@ Ghost Client isn't just a request sender. It ships with utilities that developer
 | **Server-Sent Events** | Stream and inspect live event feeds |
 | **HAR Import/Export** | Exchange requests with browser DevTools |
 | **Cookie Jar** | Manual cookie storage and auto-injection per domain |
+| **JSON Schema Validator** | Paste a schema and validate the last response |
+| **Request/Response Diff** | Side-by-side comparison of two JSON bodies |
+| **Request Templates** | One-click load common REST / GraphQL / auth patterns |
+| **Pre/Post Scripts** | JavaScript hooks for dynamic env vars and assertions |
+| **Network Throttle** | Simulate Slow 3G / Fast 3G / Slow 4G latency |
+| **JSON Minimap** | Navigate 10,000-line responses with a structural sidebar |
+| **Request Tags** | Color-coded labels: production, staging, dev, broken, wip |
+| **Backup & Restore** | One-click full export/import of all data |
+| **Data Vault** | AES-256-GCM encryption for all local data |
 
 ---
 
