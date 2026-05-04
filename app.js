@@ -2600,6 +2600,11 @@
 
       // Backup handler
       on(body.querySelector('#settingsBackupBtn'), 'click', async () => {
+        const ls = {};
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i);
+          if (k && k.startsWith('gc-')) ls[k] = localStorage.getItem(k);
+        }
         const data = {
           version: 1,
           exportedAt: new Date().toISOString(),
@@ -2609,7 +2614,8 @@
           environments: await dbGet('environments'),
           notes: await dbGet('notes'),
           cookies: await dbGet('cookies'),
-          localStorage: { assertions: localStorage.getItem('gc-assertions') },
+          vault: await dbGet('vault'),
+          localStorage: ls,
         };
         const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -2633,19 +2639,21 @@
             const text = await file.text();
             const data = JSON.parse(text);
             if (!data.version) throw new Error('Invalid backup file');
-            const stores = ['collections', 'requests', 'history', 'environments', 'notes', 'cookies'];
+            const stores = ['collections', 'requests', 'history', 'environments', 'notes', 'cookies', 'vault'];
             for (const store of stores) {
               if (Array.isArray(data[store])) {
                 await dbClear(store);
                 for (const item of data[store]) await dbPut(store, item);
               }
             }
-            if (data.localStorage?.assertions) localStorage.setItem('gc-assertions', data.localStorage.assertions);
+            if (data.localStorage && typeof data.localStorage === 'object') {
+              Object.entries(data.localStorage).forEach(([k, v]) => { if (v !== null) localStorage.setItem(k, v); });
+            }
             await renderCollections();
             await renderHistory();
             await renderEnvironments();
             await renderNotes();
-            toast('Backup restored', 'success');
+            toast('Backup restored. Reload the page to apply all settings.', 'success');
           } catch (err) {
             toast('Restore failed: ' + err.message, 'error');
           }
