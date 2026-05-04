@@ -62,6 +62,7 @@
           <button class="sidebar-tab active" data-tab="collections">Collections</button>
           <button class="sidebar-tab" data-tab="history">History</button>
           <button class="sidebar-tab" data-tab="env">Environments</button>
+          <button class="sidebar-tab" data-tab="notes">Notes</button>
           <button class="sidebar-tab" data-tab="tools">Tools</button>
         </div>
 
@@ -87,6 +88,14 @@
             <button class="btn-small" id="newEnvBtn">+ Environment</button>
           </div>
           <div class="panel-body" id="envList"></div>
+        </div>
+
+        <div class="sidebar-panel" id="panel-notes">
+          <div class="panel-header">
+            <button class="btn-small" id="newNoteBtn">+ Note</button>
+            <span style="font-size:11px;color:var(--text-tertiary);margin-left:auto;">Secure local storage</span>
+          </div>
+          <div class="panel-body" id="notesList"></div>
         </div>
 
         <div class="sidebar-panel" id="panel-tools">
@@ -216,6 +225,11 @@
 
       <!-- Main Content -->
       <main class="main-content">
+        <!-- Request Tabs -->
+        <div class="request-tabs-bar" id="requestTabsBar">
+          <div class="req-tabs-container" id="reqTabsContainer"></div>
+          <button class="btn-small" id="newReqTabBtn" title="New request tab">+</button>
+        </div>
         <!-- Request Section -->
         <section class="request-section">
           <div class="url-bar">
@@ -302,6 +316,7 @@
               <option value="bearer">Bearer Token</option>
               <option value="basic">Basic Auth</option>
               <option value="apikey">API Key</option>
+              <option value="oauth2">OAuth2 (PKCE)</option>
             </select>
             <div class="auth-fields" id="authFields"></div>
           </div>
@@ -312,6 +327,9 @@
 
         <!-- Response Section -->
         <section class="response-section">
+          <div id="responseProgress" class="response-progress" style="display:none;">
+            <div id="progressBar" class="progress-bar" style="width:0%"></div>
+          </div>
           <div class="response-header">
             <div class="response-meta">
               <span id="statusCode" class="status-code">—</span>

@@ -10,7 +10,7 @@
 
   // ===== IndexedDB =====
   const DB_NAME = 'GhostClient';
-  const DB_VERSION = 2;
+  const DB_VERSION = 3;
 
   let db = null;
 
@@ -26,6 +26,7 @@
         if (!d.objectStoreNames.contains('history')) d.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
         if (!d.objectStoreNames.contains('environments')) d.createObjectStore('environments', { keyPath: 'id', autoIncrement: true });
         if (!d.objectStoreNames.contains('cookies')) d.createObjectStore('cookies', { keyPath: 'id', autoIncrement: true });
+        if (!d.objectStoreNames.contains('notes')) d.createObjectStore('notes', { keyPath: 'id', autoIncrement: true });
       };
     });
   }
@@ -110,6 +111,108 @@
   let currentRequestId = null;
   let activeEnvId = null;
   let envsCache = [];
+
+  // ===== Request Tabs =====
+  let requestTabs = JSON.parse(localStorage.getItem('gc-request-tabs') || '[{"id":1,"name":"Request 1","method":"GET","url":"https://httpbin.org/get","headers":{"Content-Type":"application/json"},"params":{},"bodyType":"json","body":"{}","authType":"none","authConfig":{"type":"none"},"graphqlQuery":"","graphqlVariables":"{}"}]');
+  let activeTabId = parseInt(localStorage.getItem('gc-active-tab') || '1', 10);
+
+  function saveTabs() { localStorage.setItem('gc-request-tabs', JSON.stringify(requestTabs)); localStorage.setItem('gc-active-tab', String(activeTabId)); }
+
+  function getCurrentTabState() {
+    return {
+      method: $('#httpMethod').value,
+      url: $('#requestUrl').value,
+      headers: getKvData($('#headersList')),
+      params: getKvData($('#paramsList')),
+      bodyType: $('#bodyType').value,
+      body: $('#bodyEditor').value,
+      authType: $('#authType').value,
+      authConfig: getAuthConfig(),
+      graphqlQuery: $('#graphqlQuery').value,
+      graphqlVariables: $('#graphqlVariables').value,
+    };
+  }
+
+  function applyTabState(tab) {
+    $('#httpMethod').value = tab.method || 'GET';
+    $('#requestUrl').value = tab.url || '';
+    setKvData($('#headersList'), tab.headers || {});
+    if (!tab.headers || !Object.keys(tab.headers).length) {
+      // Ensure at least one empty row
+      if ($('#headersList').children.length === 0) $('#headersList').appendChild(createKvRow());
+    }
+    setKvData($('#paramsList'), tab.params || {});
+    if (!tab.params || !Object.keys(tab.params).length) {
+      if ($('#paramsList').children.length === 0) $('#paramsList').appendChild(createKvRow());
+    }
+    $('#bodyType').value = tab.bodyType || 'none';
+    $('#bodyEditor').value = tab.body || '';
+    if (tab.graphqlQuery !== undefined) $('#graphqlQuery').value = tab.graphqlQuery;
+    if (tab.graphqlVariables !== undefined) $('#graphqlVariables').value = tab.graphqlVariables;
+    $('#authType').value = tab.authType || 'none';
+    renderAuthFields();
+    setAuthConfig(tab.authConfig || { type: 'none' });
+    // Update GraphQL editor visibility
+    if ($('#bodyType').value === 'graphql') {
+      $('#bodyEditor').style.display = 'none';
+      $('#graphqlEditor').style.display = 'block';
+    } else {
+      $('#bodyEditor').style.display = 'block';
+      $('#graphqlEditor').style.display = 'none';
+    }
+  }
+
+  function renderRequestTabs() {
+    const container = $('#reqTabsContainer');
+    container.innerHTML = '';
+    requestTabs.forEach(tab => {
+      const btn = document.createElement('button');
+      btn.className = 'req-tab-btn' + (tab.id === activeTabId ? ' active' : '');
+      btn.innerHTML = `<span class="hist-method ${(tab.method || 'GET').toLowerCase()}" style="font-size:10px;padding:1px 4px;border-radius:3px;margin-right:2px;">${tab.method || 'GET'}</span><span style="overflow:hidden;text-overflow:ellipsis;max-width:120px;">${escapeHtml(tab.name)}</span><span class="tab-close" data-close="${tab.id}">×</span>`;
+      btn.addEventListener('click', (e) => {
+        if (e.target.closest('.tab-close')) {
+          e.stopPropagation();
+          closeRequestTab(tab.id);
+          return;
+        }
+        switchRequestTab(tab.id);
+      });
+      container.appendChild(btn);
+    });
+  }
+
+  function switchRequestTab(id) {
+    const current = requestTabs.find(t => t.id === activeTabId);
+    if (current) Object.assign(current, getCurrentTabState());
+    activeTabId = id;
+    const target = requestTabs.find(t => t.id === id);
+    if (target) applyTabState(target);
+    saveTabs();
+    renderRequestTabs();
+  }
+
+  function closeRequestTab(id) {
+    if (requestTabs.length <= 1) { toast('Cannot close the last tab', 'info'); return; }
+    requestTabs = requestTabs.filter(t => t.id !== id);
+    if (activeTabId === id) {
+      activeTabId = requestTabs[0].id;
+      applyTabState(requestTabs[0]);
+    }
+    saveTabs();
+    renderRequestTabs();
+  }
+
+  function addRequestTab() {
+    const current = requestTabs.find(t => t.id === activeTabId);
+    if (current) Object.assign(current, getCurrentTabState());
+    const newId = Math.max(0, ...requestTabs.map(t => t.id)) + 1;
+    const newTab = { id: newId, name: 'Request ' + newId, method: 'GET', url: '', headers: {}, params: {}, bodyType: 'none', body: '', authType: 'none', authConfig: { type: 'none' }, graphqlQuery: '', graphqlVariables: '{}' };
+    requestTabs.push(newTab);
+    activeTabId = newId;
+    applyTabState(newTab);
+    saveTabs();
+    renderRequestTabs();
+  }
 
   // ===== DOM helpers =====
   function $(sel) { return document.querySelector(sel); }
@@ -340,6 +443,28 @@
     return result;
   }
 
+  function substituteChain(str, chainData) {
+    if (!str || !str.includes('{{$chain') || !chainData) return str;
+    let result = str;
+    // {{$chain.response.status}} or {{$chain.response.statusText}}
+    result = result.replace(/\{\{\$chain\.response\.status\s*\}\}/g, String(chainData.status || ''));
+    result = result.replace(/\{\{\$chain\.response\.statusText\s*\}\}/g, chainData.statusText || '');
+    // {{$chain.response.header.x-auth-token}}
+    result = result.replace(/\{\{\$chain\.response\.header\.([\w-]+)\s*\}\}/g, (_, name) => chainData.headers?.[name.toLowerCase()] || chainData.headers?.[name] || '');
+    // {{$chain.response.body.token}} or {{$chain.response.body.user.id}}
+    result = result.replace(/\{\{\$chain\.response\.body\.([\w.]+)\s*\}\}/g, (_, path) => {
+      try {
+        if (!chainData.bodyJson) return '';
+        return String(path.split('.').reduce((o, k) => (o && o[k] !== undefined) ? o[k] : '', chainData.bodyJson));
+      } catch { return ''; }
+    });
+    return result;
+  }
+
+  function resolveVars(str, chainData) {
+    return substituteChain(substituteEnv(str), chainData);
+  }
+
   // ===== Request Engine =====
   async function sendRequest() {
     const method = $('#httpMethod').value;
@@ -407,6 +532,9 @@
         if (loc === 'header') headers[name] = key;
         else urlObj.searchParams.set(name, key);
       }
+    } else if (authType === 'oauth2') {
+      const token = substituteEnv($('#oauthAccessToken').value || '').trim();
+      if (token) headers['Authorization'] = 'Bearer ' + token;
     }
 
     // Inject cookies from jar
@@ -444,7 +572,38 @@
       clearTimeout(timeoutId);
       const elapsed = Math.round(performance.now() - startTime);
 
-      const responseText = await response.text();
+      // Progress tracking via ReadableStream
+      let responseText = '';
+      const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
+      const reader = response.body?.getReader();
+      if (reader && contentLength > 0) {
+        $('#responseProgress').style.display = 'block';
+        let received = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          received += value.byteLength;
+          responseText += new TextDecoder().decode(value, { stream: true });
+          const pct = Math.min(100, Math.round((received / contentLength) * 100));
+          $('#progressBar').style.width = pct + '%';
+        }
+        responseText += new TextDecoder().decode();
+        $('#responseProgress').style.display = 'none';
+        $('#progressBar').style.width = '0%';
+      } else if (reader) {
+        $('#responseProgress').style.display = 'block';
+        $('#progressBar').style.width = '40%';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          responseText += new TextDecoder().decode(value, { stream: true });
+        }
+        responseText += new TextDecoder().decode();
+        $('#responseProgress').style.display = 'none';
+        $('#progressBar').style.width = '0%';
+      } else {
+        responseText = await response.text();
+      }
       const size = new Blob([responseText]).size;
 
       // Status code styling
@@ -618,11 +777,28 @@
     }
   }
 
+  // ===== OAuth2 Helpers =====
+  function generateCodeVerifier() {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    let result = '';
+    const rnd = new Uint8Array(128);
+    crypto.getRandomValues(rnd);
+    for (let i = 0; i < 128; i++) result += chars[rnd[i] % chars.length];
+    return result;
+  }
+  async function generateCodeChallenge(verifier) {
+    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+    return btoa(String.fromCharCode(...new Uint8Array(hash))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  }
+
   function getAuthConfig() {
     const type = $('#authType').value;
     if (type === 'bearer') return { type, token: $('#authBearerToken')?.value || '' };
     if (type === 'basic') return { type, user: $('#authBasicUser')?.value || '', pass: $('#authBasicPass')?.value || '' };
     if (type === 'apikey') return { type, key: $('#authApiKey')?.value || '', name: $('#authApiKeyName')?.value || '', loc: $('#authApiKeyLoc')?.value || 'header' };
+    if (type === 'oauth2') {
+      return { type, authUrl: $('#oauthAuthUrl')?.value || '', tokenUrl: $('#oauthTokenUrl')?.value || '', clientId: $('#oauthClientId')?.value || '', clientSecret: $('#oauthClientSecret')?.value || '', scope: $('#oauthScope')?.value || '', redirectUri: $('#oauthRedirectUri')?.value || 'http://localhost:8080/callback', accessToken: $('#oauthAccessToken')?.value || '', refreshToken: $('#oauthRefreshToken')?.value || '' };
+    }
     return { type: 'none' };
   }
 
@@ -644,6 +820,16 @@
         $('#authApiKey').value = config.key || '';
         $('#authApiKeyName').value = config.name || '';
         $('#authApiKeyLoc').value = config.loc || 'header';
+      }
+      if (config.type === 'oauth2') {
+        $('#oauthAuthUrl').value = config.authUrl || '';
+        $('#oauthTokenUrl').value = config.tokenUrl || '';
+        $('#oauthClientId').value = config.clientId || '';
+        $('#oauthClientSecret').value = config.clientSecret || '';
+        $('#oauthScope').value = config.scope || '';
+        $('#oauthRedirectUri').value = config.redirectUri || 'http://localhost:8080/callback';
+        $('#oauthAccessToken').value = config.accessToken || '';
+        $('#oauthRefreshToken').value = config.refreshToken || '';
       }
     }, 0);
   }
@@ -687,6 +873,110 @@
             <option value="query">Query Param</option>
           </select>
         </div>`;
+    } else if (type === 'oauth2') {
+      container.innerHTML = `
+        <div class="auth-field-row">
+          <label>Authorization URL</label>
+          <input type="text" id="oauthAuthUrl" placeholder="https://provider.com/oauth/authorize">
+        </div>
+        <div class="auth-field-row">
+          <label>Token URL</label>
+          <input type="text" id="oauthTokenUrl" placeholder="https://provider.com/oauth/token">
+        </div>
+        <div class="auth-field-row" style="display:flex;gap:8px;">
+          <div style="flex:1">
+            <label>Client ID</label>
+            <input type="text" id="oauthClientId">
+          </div>
+          <div style="flex:1">
+            <label>Client Secret (opt)</label>
+            <input type="password" id="oauthClientSecret">
+          </div>
+        </div>
+        <div class="auth-field-row" style="display:flex;gap:8px;">
+          <div style="flex:1">
+            <label>Scope</label>
+            <input type="text" id="oauthScope" placeholder="read write">
+          </div>
+          <div style="flex:1">
+            <label>Redirect URI</label>
+            <input type="text" id="oauthRedirectUri" value="http://localhost:8080/callback">
+          </div>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button class="btn-small" id="oauthGenUrlBtn" style="flex:1">Generate Auth URL</button>
+          <button class="btn-small" id="oauthExchangeBtn" style="flex:1">Exchange Code</button>
+        </div>
+        <div class="auth-field-row" style="margin-top:8px;">
+          <label>Access Token</label>
+          <input type="text" id="oauthAccessToken" placeholder="Paste token here or use buttons above">
+        </div>
+        <div class="auth-field-row">
+          <label>Refresh Token</label>
+          <input type="text" id="oauthRefreshToken" placeholder="(optional)">
+        </div>`;
+      // Wire up OAuth2 buttons after DOM insertion
+      setTimeout(() => {
+        const genBtn = $('#oauthGenUrlBtn');
+        if (genBtn) {
+          on(genBtn, 'click', async () => {
+            const authUrl = $('#oauthAuthUrl').value.trim();
+            const clientId = $('#oauthClientId').value.trim();
+            const redirectUri = $('#oauthRedirectUri').value.trim() || 'http://localhost:8080/callback';
+            const scope = $('#oauthScope').value.trim();
+            if (!authUrl || !clientId) { toast('Authorization URL and Client ID required', 'error'); return; }
+            const verifier = generateCodeVerifier();
+            const challenge = await generateCodeChallenge(verifier);
+            const state = generateCodeVerifier().slice(0, 16);
+            localStorage.setItem('gc-oauth-verifier', verifier);
+            localStorage.setItem('gc-oauth-state', state);
+            const url = new URL(authUrl);
+            url.searchParams.set('response_type', 'code');
+            url.searchParams.set('client_id', clientId);
+            url.searchParams.set('redirect_uri', redirectUri);
+            url.searchParams.set('scope', scope);
+            url.searchParams.set('state', state);
+            url.searchParams.set('code_challenge', challenge);
+            url.searchParams.set('code_challenge_method', 'S256');
+            window.open(url.toString(), 'oauth_popup', 'width=600,height=700');
+            toast('Authorization URL opened in popup. Complete authorization, then use Exchange Code.', 'info');
+          });
+        }
+        const exBtn = $('#oauthExchangeBtn');
+        if (exBtn) {
+          on(exBtn, 'click', async () => {
+            const tokenUrl = $('#oauthTokenUrl').value.trim();
+            const clientId = $('#oauthClientId').value.trim();
+            const clientSecret = $('#oauthClientSecret').value.trim();
+            const redirectUri = $('#oauthRedirectUri').value.trim() || 'http://localhost:8080/callback';
+            if (!tokenUrl || !clientId) { toast('Token URL and Client ID required', 'error'); return; }
+            const code = prompt('Paste the authorization code from the redirect:');
+            if (!code) return;
+            const verifier = localStorage.getItem('gc-oauth-verifier');
+            if (!verifier) { toast('No code verifier found. Generate Auth URL first.', 'error'); return; }
+            const body = new URLSearchParams();
+            body.append('grant_type', 'authorization_code');
+            body.append('code', code);
+            body.append('redirect_uri', redirectUri);
+            body.append('client_id', clientId);
+            if (clientSecret) body.append('client_secret', clientSecret);
+            body.append('code_verifier', verifier);
+            try {
+              const resp = await fetch(tokenUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body });
+              const data = await resp.json();
+              if (data.access_token) {
+                $('#oauthAccessToken').value = data.access_token;
+                if (data.refresh_token) $('#oauthRefreshToken').value = data.refresh_token;
+                toast('Token exchanged successfully!', 'success');
+              } else {
+                toast('Token exchange failed: ' + (data.error_description || data.error || 'Unknown error'), 'error');
+              }
+            } catch (err) {
+              toast('Token exchange failed: ' + err.message, 'error');
+            }
+          });
+        }
+      }, 0);
     }
   }
 
@@ -1078,6 +1368,24 @@
   }
 
   function loadRequest(req) {
+    // Update active tab with loaded request state
+    const current = requestTabs.find(t => t.id === activeTabId);
+    if (current) {
+      current.method = req.method;
+      current.url = req.url;
+      current.headers = req.headers || {};
+      current.params = req.params || {};
+      current.bodyType = req.bodyType || 'none';
+      current.body = req.body || '';
+      current.authType = req.authConfig?.type || 'none';
+      current.authConfig = req.authConfig || { type: 'none' };
+      if (req.bodyType === 'graphql' && typeof req.body === 'object') {
+        current.graphqlQuery = req.body.query || '';
+        current.graphqlVariables = req.body.variables || '{}';
+      }
+      saveTabs();
+      renderRequestTabs();
+    }
     $('#httpMethod').value = req.method;
     $('#requestUrl').value = req.url;
     setKvData($('#headersList'), req.headers || {});
@@ -1111,6 +1419,47 @@
     });
   }
 
+  // ===== Notes =====
+  async function renderNotes() {
+    const container = $('#notesList');
+    const notes = await dbGet('notes');
+    container.innerHTML = '';
+
+    if (notes.length === 0) {
+      container.innerHTML = '<div class="empty-state"><div>Store sensitive notes locally. Never synced to any cloud.</div></div>';
+      return;
+    }
+
+    notes.forEach(note => {
+      const el = document.createElement('div');
+      el.className = 'env-item';
+      el.style.cursor = 'pointer';
+      el.innerHTML = `<span style="flex:1;font-weight:500">${escapeHtml(note.title || 'Untitled')}</span><span style="font-size:10px;color:var(--text-muted)">${formatTime(note.timestamp)}</span>`;
+      on(el, 'click', () => {
+        const body = document.createElement('div');
+        body.innerHTML = `
+          <input type="text" id="noteTitleInput" value="${escapeHtml(note.title || '')}" placeholder="Title" style="width:100%;padding:8px;margin-bottom:8px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);">
+          <textarea id="noteBodyInput" placeholder="Note content..." style="width:100%;min-height:120px;padding:8px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);resize:vertical;">${escapeHtml(note.body || '')}</textarea>
+        `;
+        showModal('Edit Note', body, async () => {
+          note.title = $('#noteTitleInput').value.trim();
+          note.body = $('#noteBodyInput').value;
+          note.timestamp = Date.now();
+          await dbPut('notes', note);
+          await renderNotes();
+          toast('Note updated', 'success');
+        }, async () => {
+          if (confirm('Delete this note?')) {
+            await dbDelete('notes', note.id);
+            await renderNotes();
+            toast('Note deleted', 'info');
+          }
+        });
+      });
+      container.appendChild(el);
+    });
+  }
+
   // ===== Import / Export =====
   async function exportData() {
     const data = {
@@ -1119,6 +1468,7 @@
       collections: await dbGet('collections'),
       requests: await dbGet('requests'),
       environments: await dbGet('environments'),
+      notes: await dbGet('notes'),
     };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1143,9 +1493,13 @@
       if (data.environments) {
         for (const e of data.environments) { e.id = undefined; await dbPut('environments', e); }
       }
+      if (data.notes) {
+        for (const n of data.notes) { n.id = undefined; await dbPut('notes', n); }
+      }
       await renderCollections();
       await renderEnvironments();
       await renderHistory();
+      await renderNotes();
       toast('Import successful', 'success');
     } catch (err) {
       toast('Import failed: ' + err.message, 'error');
@@ -1249,6 +1603,12 @@
     on(window, 'online', updateOnlineStatus);
     on(window, 'offline', updateOnlineStatus);
     updateOnlineStatus();
+
+    // Request tabs
+    on($('#newReqTabBtn'), 'click', addRequestTab);
+    renderRequestTabs();
+    const savedActive = requestTabs.find(t => t.id === activeTabId);
+    if (savedActive) applyTabState(savedActive);
 
     on($('#sendBtn'), 'click', sendRequest);
     on($('#saveBtn'), 'click', () => {
@@ -1358,6 +1718,21 @@
         await dbPut('environments', { name, vars, timestamp: Date.now() });
         await renderEnvironments();
         toast('Environment created', 'success');
+      });
+    });
+
+    on($('#newNoteBtn'), 'click', () => {
+      const body = document.createElement('div');
+      body.innerHTML = `
+        <input type="text" id="newNoteTitle" placeholder="Note title" style="width:100%;padding:8px;margin-bottom:8px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);">
+        <textarea id="newNoteBody" placeholder="Note content..." style="width:100%;min-height:120px;padding:8px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);resize:vertical;"></textarea>
+      `;
+      showModal('New Note', body, async () => {
+        const title = $('#newNoteTitle').value.trim();
+        if (!title) return;
+        await dbPut('notes', { title, body: $('#newNoteBody').value, timestamp: Date.now() });
+        await renderNotes();
+        toast('Note created', 'success');
       });
     });
 
@@ -1958,14 +2333,16 @@
 
       // Clear all data handler
       on(body.querySelector('#settingsClearAll'), 'click', () => {
-        showModal('Confirm Delete', 'This will erase ALL collections, requests, history, and environments. This cannot be undone.', async () => {
+        showModal('Confirm Delete', 'This will erase ALL collections, requests, history, environments, and notes. This cannot be undone.', async () => {
           await dbClear('collections');
           await dbClear('requests');
           await dbClear('history');
           await dbClear('environments');
+          await dbClear('notes');
           await renderCollections();
           await renderHistory();
           await renderEnvironments();
+          await renderNotes();
           toast('All data cleared', 'info');
         });
       });
@@ -2776,34 +3153,50 @@
           resultsDiv.appendChild(row);
         });
       } else {
-        // Sequential execution
+        // Sequential execution with request chaining
+        let chainData = null;
         for (const req of allReqs) {
           try {
             const start = performance.now();
-            const headers = req.headers || {};
+            // Resolve chain variables in URL, headers, body
+            const resolvedUrl = resolveVars(req.url, chainData);
+            const resolvedHeaders = {};
+            Object.entries(req.headers || {}).forEach(([k, v]) => {
+              resolvedHeaders[k] = resolveVars(v, chainData);
+            });
             let body = null;
             if (req.body && req.bodyType !== 'none') {
               if (req.bodyType === 'graphql' && typeof req.body === 'object') {
                 const variables = req.body.variables ? JSON.parse(req.body.variables) : {};
                 body = JSON.stringify({ query: req.body.query, variables });
               } else {
-                body = req.body;
+                body = resolveVars(req.body, chainData);
               }
             }
             const cRunner = new AbortController();
             const tRunner = setTimeout(() => cRunner.abort(), 10000);
-            const resp = await fetch(req.url, { method: req.method, headers, body, signal: cRunner.signal });
+            const resp = await fetch(resolvedUrl, { method: req.method, headers: resolvedHeaders, body, signal: cRunner.signal });
             clearTimeout(tRunner);
             const time = Math.round(performance.now() - start);
             const status = resp.status;
             const ok = status < 400;
             if (ok) passCount++; else failCount++;
+
+            // Build chain data for next request
+            const respHeaders = {};
+            resp.headers.forEach((v, k) => respHeaders[k.toLowerCase()] = v);
+            const respText = await resp.text();
+            let bodyJson = null;
+            try { bodyJson = JSON.parse(respText); } catch {}
+            chainData = { status, statusText: resp.statusText, headers: respHeaders, bodyText: respText, bodyJson };
+
             const row = document.createElement('div');
             row.style.cssText = 'display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;';
             row.innerHTML = `<span class="hist-method ${req.method.toLowerCase()}" style="flex-shrink:0">${req.method}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)}</span><span style="color:${ok ? 'var(--accent-green)' : 'var(--accent-red)'};font-weight:600">${status}</span><span style="color:var(--text-muted);flex-shrink:0">${time}ms</span>`;
             resultsDiv.appendChild(row);
           } catch (err) {
             failCount++;
+            chainData = null; // break chain on error
             const row = document.createElement('div');
             row.style.cssText = 'display:flex;gap:12px;padding:6px 0;border-bottom:1px solid var(--border-subtle);font-size:12px;';
             row.innerHTML = `<span class="hist-method ${req.method.toLowerCase()}" style="flex-shrink:0">${req.method}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)}</span><span style="color:var(--accent-red);font-weight:600">ERR</span>`;
@@ -2871,6 +3264,7 @@
     await renderCollections();
     await renderHistory();
     await renderEnvironments();
+    await renderNotes();
 
     toast('Ghost Client ready — 100% offline', 'success');
   }
