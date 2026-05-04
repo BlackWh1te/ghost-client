@@ -1,0 +1,26 @@
+{
+  "name": "Ghost Client",
+  "short_name": "Ghost Client",
+  "description": "Privacy-first API client that lives in your browser. No cloud. No account. No telemetry.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0f172a",
+  "theme_color": "#6366f1",
+  "orientation": "any",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='48' fill='%236366f1'/%3E%3Cpath d='M64 96h64M96 64v64' stroke='white' stroke-width='12' stroke-linecap='round'/%3E%3C/svg%3E",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' rx='128' fill='%236366f1'/%3E%3Cpath d='M170 256h172M256 170v172' stroke='white' stroke-width='32' stroke-linecap='round'/%3E%3C/svg%3E",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["developer", "utilities"],
+  "screenshots": []
+}

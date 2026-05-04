@@ -121,6 +121,17 @@ html, body {
   letter-spacing: -0.3px;
 }
 
+.online-indicator {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 8px;
+  background: var(--accent-green);
+  transition: background 0.3s;
+}
+.online-indicator.offline { background: var(--accent-red); }
+
 .badge {
   font-size: 10px;
   font-weight: 600;
@@ -1354,6 +1365,75 @@ html, body {
 .tool-output .jwt-header { color: #fca5a5; }
 .tool-output .jwt-payload { color: #86efac; }
 .tool-output .jwt-sig { color: var(--text-muted); }
+
+.tool-input {
+  width: 100%;
+  padding: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  outline: none;
+  margin-bottom: 4px;
+  line-height: 1.4;
+}
+
+.tool-input:focus { border-color: var(--border-focus); }
+
+.tool-select {
+  width: 100%;
+  padding: 6px 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  outline: none;
+  margin-bottom: 4px;
+  cursor: pointer;
+}
+
+.tool-select:focus { border-color: var(--border-focus); }
+
+.ts-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 11px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.ts-row:last-child { border-bottom: none; }
+
+.ts-label { color: var(--text-tertiary); font-weight: 600; }
+.ts-val { color: var(--text-secondary); font-family: var(--font-mono); }
+
+.assertion-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-subtle);
+  font-size: 12px;
+}
+.assertion-row:last-child { border-bottom: none; }
+.assertion-pass { color: var(--accent-green); }
+.assertion-fail { color: var(--accent-red); }
+.assertion-pending { color: var(--text-tertiary); }
+.assertion-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.assertion-result:last-child { border-bottom: none; }
+.assertion-result .status-icon { font-weight: 700; }
 
 /* Code gen modal */
 .code-gen-tabs {

@@ -11,6 +11,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ghost Client — Privacy-First API Client</title>
   <link rel="stylesheet" href="style.css">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#6366f1">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -34,6 +36,7 @@
           <span class="logo-text">Ghost Client</span>
         </div>
         <span class="badge">100% Offline</span>
+        <span id="onlineIndicator" class="online-indicator online" title="Online"></span>
       </div>
       <div class="header-right">
         <button class="btn-icon" id="themeToggle" title="Toggle theme">
@@ -66,6 +69,7 @@
           <div class="panel-header">
             <button class="btn-small" id="newCollectionBtn">+ Collection</button>
             <button class="btn-small" id="runCollectionBtn" title="Run all requests">▶ Run</button>
+            <input type="text" id="collectionSearch" class="filter-input" placeholder="Search collections..." style="margin-left:auto;padding:4px 8px;font-size:11px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;width:140px;">
           </div>
           <div class="panel-body" id="collectionsList"></div>
         </div>
@@ -123,11 +127,88 @@
               <div id="urlOutput" class="tool-output"></div>
             </div>
             <div class="tool-group">
+              <label class="tool-label">HAR Import</label>
+              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px;">Import HTTP Archive from browser DevTools</div>
+              <button class="btn-small" id="importHarBtn" style="width:100%">Import HAR File</button>
+            </div>
+            <div class="tool-group">
               <label class="tool-label">JSON Diff</label>
               <textarea id="jsonDiffA" class="tool-textarea" placeholder="Original JSON..."></textarea>
               <textarea id="jsonDiffB" class="tool-textarea" placeholder="Modified JSON..."></textarea>
               <button class="btn-small" id="jsonDiffBtn" style="width:100%;margin-top:4px">Compare</button>
               <div id="jsonDiffOutput" class="tool-output"></div>
+            </div>
+            <div class="tool-group">
+              <label class="tool-label">Timestamp Converter</label>
+              <input type="text" id="tsInput" class="tool-input" placeholder="Unix timestamp or ISO date...">
+              <div id="tsOutput" class="tool-output" style="display:none"></div>
+            </div>
+            <div class="tool-group">
+              <label class="tool-label">Hash Generator</label>
+              <textarea id="hashInput" class="tool-textarea" placeholder="Text to hash..."></textarea>
+              <select id="hashAlgo" class="tool-select">
+                <option value="SHA-256" selected>SHA-256</option>
+                <option value="SHA-1">SHA-1</option>
+                <option value="SHA-512">SHA-512</option>
+                <option value="MD5">MD5</option>
+              </select>
+              <div class="tool-row">
+                <button class="btn-small" id="hashBtn" style="flex:1">Generate</button>
+                <button class="btn-small" id="hashCopyBtn" style="flex:1">Copy</button>
+              </div>
+              <div id="hashOutput" class="tool-output"></div>
+            </div>
+            <div class="tool-group">
+              <label class="tool-label">Cookie Jar</label>
+              <div id="cookieJarList" class="tool-output" style="max-height:160px;margin-bottom:6px;"></div>
+              <div class="tool-row" style="gap:4px;margin-bottom:4px;">
+                <input type="text" id="cookieDomain" class="tool-input" placeholder="Domain (e.g., api.example.com)" style="flex:1;margin-bottom:0;">
+              </div>
+              <div class="tool-row" style="gap:4px;margin-bottom:4px;">
+                <input type="text" id="cookieName" class="tool-input" placeholder="Name" style="flex:1;margin-bottom:0;">
+                <input type="text" id="cookieValue" class="tool-input" placeholder="Value" style="flex:1;margin-bottom:0;">
+              </div>
+              <div class="tool-row" style="gap:4px;margin-bottom:4px;">
+                <input type="text" id="cookiePath" class="tool-input" placeholder="Path (default /)" style="flex:1;margin-bottom:0;">
+                <button class="btn-small" id="addCookieBtn" style="flex:1">Add Cookie</button>
+              </div>
+              <button class="btn-small btn-danger" id="clearCookiesBtn" style="width:100%">Clear All Cookies</button>
+            </div>
+            <div class="tool-group">
+              <label class="tool-label">WebSocket Client</label>
+              <div class="tool-row" style="gap:4px;margin-bottom:4px;">
+                <input type="text" id="wsUrl" class="tool-input" placeholder="wss://echo.websocket.org/" value="wss://echo.websocket.org/" style="flex:1;margin-bottom:0;">
+                <button class="btn-small" id="wsConnectBtn" style="flex:0 0 80px;">Connect</button>
+              </div>
+              <div id="wsStatus" style="font-size:11px;color:var(--text-tertiary);margin-bottom:4px;">Disconnected</div>
+              <div id="wsLog" class="tool-output" style="max-height:200px;overflow:auto;font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;word-break:break-word;margin-bottom:4px;"></div>
+              <div class="tool-row" style="gap:4px;">
+                <textarea id="wsMessage" class="tool-textarea" placeholder="Message to send..." style="flex:1;min-height:32px;margin-bottom:0;"></textarea>
+                <button class="btn-small" id="wsSendBtn" style="flex:0 0 60px;align-self:flex-end;">Send</button>
+              </div>
+              <button class="btn-small btn-danger" id="wsClearBtn" style="width:100%;margin-top:4px;">Clear Log</button>
+            </div>
+            <div class="tool-group">
+              <label class="tool-label">Server-Sent Events (SSE)</label>
+              <div class="tool-row" style="gap:4px;margin-bottom:4px;">
+                <input type="text" id="sseUrl" class="tool-input" placeholder="https://api.example.com/events" style="flex:1;margin-bottom:0;">
+                <button class="btn-small" id="sseConnectBtn" style="flex:0 0 80px;">Connect</button>
+              </div>
+              <div id="sseStatus" style="font-size:11px;color:var(--text-tertiary);margin-bottom:4px;">Disconnected</div>
+              <div id="sseLog" class="tool-output" style="max-height:200px;overflow:auto;font-family:var(--font-mono);font-size:11px;white-space:pre-wrap;word-break:break-word;margin-bottom:4px;"></div>
+              <button class="btn-small btn-danger" id="sseClearBtn" style="width:100%;">Clear Log</button>
+            </div>
+            <div class="tool-group">
+              <label class="tool-label">UUID Generator</label>
+              <div class="tool-row">
+                <select id="uuidCount" class="tool-select" style="flex:1">
+                  <option value="1" selected>1 UUID</option>
+                  <option value="5">5 UUIDs</option>
+                  <option value="10">10 UUIDs</option>
+                </select>
+                <button class="btn-small" id="uuidBtn" style="flex:1">Generate</button>
+              </div>
+              <div id="uuidOutput" class="tool-output"></div>
             </div>
           </div>
         </div>
@@ -242,6 +323,7 @@
               <button class="res-tab active" data-tab="res-body">Body</button>
               <button class="res-tab" data-tab="res-headers">Headers</button>
               <button class="res-tab" data-tab="res-cookies">Cookies</button>
+              <button class="res-tab" data-tab="res-tests">Tests</button>
             </div>
           </div>
 
@@ -255,6 +337,7 @@
               <button class="btn-small" id="copyResponseBtn">Copy</button>
               <button class="btn-small" id="copyCurlBtn" title="Copy as cURL">cURL</button>
               <button class="btn-small" id="downloadResponseBtn">Download</button>
+              <button class="btn-small" id="exportHarBtn" title="Export as HAR">HAR</button>
               <div class="toolbar-spacer"></div>
               <input type="text" id="resSearch" class="search-input" placeholder="Search response...">
               <select id="searchOptions" class="search-options" style="padding:4px 8px;font-size:11px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);outline:none;">
@@ -272,6 +355,15 @@
 
           <div class="response-panel" id="res-cookies">
             <div class="headers-table" id="responseCookies"></div>
+          </div>
+
+          <div class="response-panel" id="res-tests">
+            <div class="response-toolbar">
+              <button class="btn-small" id="addAssertionBtn">+ Add Assertion</button>
+              <span id="testSummary" style="font-size:11px;color:var(--text-tertiary);margin-left:auto;"></span>
+            </div>
+            <div id="assertionsList" style="padding:12px;"></div>
+            <div id="assertionResults" style="padding:12px;border-top:1px solid var(--border-subtle);"></div>
           </div>
         </section>
       </main>

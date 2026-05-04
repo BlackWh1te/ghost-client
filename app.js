@@ -10,7 +10,7 @@
 
   // ===== IndexedDB =====
   const DB_NAME = 'GhostClient';
-  const DB_VERSION = 1;
+  const DB_VERSION = 2;
 
   let db = null;
 
@@ -25,6 +25,7 @@
         if (!d.objectStoreNames.contains('requests')) d.createObjectStore('requests', { keyPath: 'id', autoIncrement: true });
         if (!d.objectStoreNames.contains('history')) d.createObjectStore('history', { keyPath: 'id', autoIncrement: true });
         if (!d.objectStoreNames.contains('environments')) d.createObjectStore('environments', { keyPath: 'id', autoIncrement: true });
+        if (!d.objectStoreNames.contains('cookies')) d.createObjectStore('cookies', { keyPath: 'id', autoIncrement: true });
       };
     });
   }
@@ -67,6 +68,42 @@
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
+  }
+
+  // ===== Cookie Helpers =====
+  async function getCookiesForDomain(domain) {
+    const all = await dbGet('cookies');
+    return all.filter(c => {
+      const d = c.domain;
+      if (!d) return false;
+      if (d.startsWith('.')) return domain.endsWith(d.slice(1)) || domain === d.slice(1);
+      return domain === d || domain.endsWith('.' + d);
+    });
+  }
+
+  async function setCookie(name, value, domain, path, expires) {
+    const all = await dbGet('cookies');
+    const existing = all.find(c => c.name === name && c.domain === domain && c.path === (path || '/'));
+    const cookie = { name, value, domain, path: path || '/', expires: expires || null, timestamp: Date.now() };
+    if (existing) cookie.id = existing.id;
+    await dbPut('cookies', cookie);
+  }
+
+  async function deleteCookie(id) {
+    await dbDelete('cookies', id);
+  }
+
+  async function clearCookiesForDomain(domain) {
+    const all = await dbGet('cookies');
+    for (const c of all) {
+      if (c.domain === domain || domain.endsWith('.' + c.domain) || c.domain.endsWith('.' + domain)) {
+        await dbDelete('cookies', c.id);
+      }
+    }
+  }
+
+  function extractDomain(url) {
+    try { return new URL(url).hostname; } catch { return ''; }
   }
 
   // ===== State =====
@@ -372,6 +409,15 @@
       }
     }
 
+    // Inject cookies from jar
+    const domain = extractDomain(url);
+    if (domain) {
+      const jarCookies = await getCookiesForDomain(domain);
+      if (jarCookies.length > 0 && !headers['Cookie']) {
+        headers['Cookie'] = jarCookies.map(c => `${c.name}=${c.value}`).join('; ');
+      }
+    }
+
     // UI state
     $('#sendBtn').innerHTML = '<div class="spinner"></div> Sending...';
     $('#sendBtn').disabled = true;
@@ -415,7 +461,7 @@
       renderHeaders(resHeaders);
 
       // Cookies
-      renderCookies(document.cookie);
+      await renderCookies(document.cookie, url);
 
       // Body
       const contentType = response.headers.get('content-type') || '';
@@ -432,7 +478,7 @@
       } catch {
         $('#responseBody').innerHTML = `<code class="language-json">${escapeHtml(responseText)}</code>`;
       }
-      window._lastResponse = { text: responseText, headers: resHeaders, status: code, statusText: response.statusText, time: elapsed, size };
+      window._lastResponse = { text: responseText, headers: resHeaders, status: code, statusText: response.statusText, time: elapsed, size, url: finalUrl, method, reqHeaders: headers, reqBody: body };
 
       // Save to history
       if (localStorage.getItem('gc-auto-save') !== 'false') {
@@ -460,6 +506,9 @@
         timestamp: Date.now(),
       });
       await renderHistory();
+
+      // Run assertions
+      runAssertions(code, responseText, resHeaders, elapsed);
 
       toast(`Response received: ${code} in ${elapsed}ms`, code < 300 ? 'success' : 'info');
 
@@ -518,21 +567,55 @@
     });
   }
 
-  function renderCookies(cookies) {
+  async function renderCookies(cookies, url) {
     const container = $('#responseCookies');
     container.innerHTML = '';
-    if (!cookies || !cookies.trim()) {
-      container.innerHTML = '<div class="empty-state">No cookies received</div>';
+    const domain = extractDomain(url);
+
+    // Show cookie jar for this domain
+    const jarCookies = domain ? await getCookiesForDomain(domain) : [];
+
+    // Header info
+    const info = document.createElement('div');
+    info.style.cssText = 'font-size:11px;color:var(--text-tertiary);padding:8px;border-bottom:1px solid var(--border-subtle);margin-bottom:8px;';
+    info.textContent = domain ? `Cookie jar for ${domain} (${jarCookies.length} entries)` : 'Cookie jar';
+    container.appendChild(info);
+
+    if (jarCookies.length === 0 && (!cookies || !cookies.trim())) {
+      container.innerHTML += '<div class="empty-state">No cookies in jar for this domain</div>';
       return;
     }
-    cookies.split(';').forEach(c => {
-      const [name, ...rest] = c.trim().split('=');
-      if (!name) return;
-      const row = document.createElement('div');
-      row.className = 'header-row';
-      row.innerHTML = `<div class="header-name">${escapeHtml(name.trim())}</div><div class="header-value">${escapeHtml(rest.join('=').trim())}</div>`;
-      container.appendChild(row);
-    });
+
+    // Response cookies (from Set-Cookie header, rarely visible due to browser security)
+    if (cookies && cookies.trim()) {
+      const respHeader = document.createElement('div');
+      respHeader.style.cssText = 'font-size:11px;font-weight:600;color:var(--text-tertiary);padding:8px;';
+      respHeader.textContent = 'Response Cookies';
+      container.appendChild(respHeader);
+      cookies.split(';').forEach(c => {
+        const [name, ...rest] = c.trim().split('=');
+        if (!name) return;
+        const row = document.createElement('div');
+        row.className = 'header-row';
+        row.innerHTML = `<div class="header-name">${escapeHtml(name.trim())}</div><div class="header-value">${escapeHtml(rest.join('=').trim())}</div>`;
+        container.appendChild(row);
+      });
+    }
+
+    // Jar cookies
+    if (jarCookies.length > 0) {
+      const jarHeader = document.createElement('div');
+      jarHeader.style.cssText = 'font-size:11px;font-weight:600;color:var(--text-tertiary);padding:8px;border-top:1px solid var(--border-subtle);margin-top:8px;';
+      jarHeader.textContent = 'Ghost Client Cookie Jar';
+      container.appendChild(jarHeader);
+      jarCookies.forEach(c => {
+        const row = document.createElement('div');
+        row.className = 'header-row';
+        const expired = c.expires && new Date(c.expires) < new Date() ? ' [expired]' : '';
+        row.innerHTML = `<div class="header-name">${escapeHtml(c.name)}${expired}</div><div class="header-value">${escapeHtml(c.value)} <span style="color:var(--text-tertiary)">(${escapeHtml(c.path || '/')})</span></div>`;
+        container.appendChild(row);
+      });
+    }
   }
 
   function getAuthConfig() {
@@ -696,26 +779,63 @@
   }
 
   // ===== Collections =====
-  async function renderCollections() {
+  async function renderCollections(searchTerm = '') {
     const container = $('#collectionsList');
     const collections = await dbGet('collections');
     const allReqs = await dbGet('requests');
     container.innerHTML = '';
+
+    const term = searchTerm.toLowerCase().trim();
 
     if (collections.length === 0) {
       container.innerHTML = '<div class="empty-state"><div>Create a collection to organize your requests</div></div>';
       return;
     }
 
-    for (const coll of collections) {
+    // Build lookup maps
+    const byParent = new Map();
+    collections.forEach(c => {
+      const pid = c.parentId || null;
+      if (!byParent.has(pid)) byParent.set(pid, []);
+      byParent.get(pid).push(c);
+    });
+
+    let hasMatch = false;
+
+    // Recursive render function
+    function renderColl(coll, level = 0) {
+      const collMatch = !term || coll.name.toLowerCase().includes(term);
+      const collReqs = allReqs.filter(r => r.collectionId === coll.id);
+      const matchedReqs = term ? collReqs.filter(r => r.name.toLowerCase().includes(term) || r.method.toLowerCase().includes(term)) : collReqs;
+
+      // Check children for match (to show parent if child matches)
+      const childColls = byParent.get(coll.id) || [];
+      let childHasMatch = false;
+      if (term) {
+        for (const cc of childColls) {
+          if (cc.name.toLowerCase().includes(term)) childHasMatch = true;
+          const ccReqs = allReqs.filter(r => r.collectionId === cc.id);
+          if (ccReqs.some(r => r.name.toLowerCase().includes(term) || r.method.toLowerCase().includes(term))) childHasMatch = true;
+        }
+      }
+
+      const showColl = collMatch || matchedReqs.length > 0 || childHasMatch || !term;
+      if (!showColl) return false;
+      hasMatch = true;
+
       const folder = document.createElement('div');
       folder.className = 'coll-folder';
+      folder.style.paddingLeft = (level * 12) + 'px';
       const header = document.createElement('div');
       header.className = 'coll-folder-header';
+      const isSub = level > 0;
       header.innerHTML = `
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
         <span style="flex:1">${escapeHtml(coll.name)}</span>
         <button class="coll-action-btn" data-action="add" title="Add request">+</button>
+        ${level < 1 ? `<button class="coll-action-btn" data-action="sub" title="New subfolder">📁</button>` : ''}
+        <button class="coll-action-btn" data-action="exp" title="Export">↓</button>
+        <button class="coll-action-btn" data-action="imp" title="Import">↑</button>
         <button class="coll-action-btn" data-action="del" title="Delete">×</button>
       `;
 
@@ -723,34 +843,103 @@
         e.stopPropagation();
         addRequestToCollection(coll.id);
       });
+
+      const subBtn = header.querySelector('[data-action="sub"]');
+      if (subBtn) {
+        on(subBtn, 'click', (e) => {
+          e.stopPropagation();
+          const body = document.createElement('div');
+          body.innerHTML = '<input type="text" id="newSubName" placeholder="Folder name">';
+          showModal('New Subfolder', body, async () => {
+            const name = $('#newSubName').value.trim();
+            if (!name) return;
+            await dbPut('collections', { name, parentId: coll.id, timestamp: Date.now() });
+            await renderCollections($('#collectionSearch').value);
+            toast('Subfolder created', 'success');
+          });
+        });
+      }
+
+      // Export collection
+      on(header.querySelector('[data-action="exp"]'), 'click', (e) => {
+        e.stopPropagation();
+        const reqs = allReqs.filter(r => r.collectionId === coll.id);
+        const data = { name: coll.name, exportedAt: new Date().toISOString(), requests: reqs };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${coll.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_collection.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast('Collection exported', 'success');
+      });
+
+      // Import into collection
+      on(header.querySelector('[data-action="imp"]'), 'click', (e) => {
+        e.stopPropagation();
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = async (ev) => {
+          const file = ev.target.files[0];
+          if (!file) return;
+          try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            if (!Array.isArray(data.requests)) throw new Error('Invalid format: expected requests array');
+            let count = 0;
+            for (const req of data.requests) {
+              delete req.id;
+              req.collectionId = coll.id;
+              req.timestamp = Date.now();
+              await dbPut('requests', req);
+              count++;
+            }
+            await renderCollections($('#collectionSearch').value);
+            toast(`${count} requests imported`, 'success');
+          } catch (err) {
+            toast('Import failed: ' + err.message, 'error');
+          }
+        };
+        input.click();
+      });
+
       on(header.querySelector('[data-action="del"]'), 'click', (e) => {
         e.stopPropagation();
-        showModal('Delete Collection', `Delete "${coll.name}"?`, async () => {
-          await dbDelete('collections', coll.id);
-          const reqsToDel = await dbGet('requests');
-          for (const r of reqsToDel) { if (r.collectionId === coll.id) await dbDelete('requests', r.id); }
-          await renderCollections();
+        showModal('Delete Collection', `Delete "${coll.name}" and all its contents?`, async () => {
+          // Recursively delete sub-collections and their requests
+          async function deleteCollRecursively(cid) {
+            const reqsToDel = allReqs.filter(r => r.collectionId === cid);
+            for (const r of reqsToDel) await dbDelete('requests', r.id);
+            const subColls = (byParent.get(cid) || []);
+            for (const sc of subColls) await deleteCollRecursively(sc.id);
+            await dbDelete('collections', cid);
+          }
+          await deleteCollRecursively(coll.id);
+          await renderCollections($('#collectionSearch').value);
           toast('Collection deleted', 'info');
         });
       });
 
       const children = document.createElement('div');
       children.className = 'coll-folder-children';
-      const collReqs = allReqs.filter(r => r.collectionId === coll.id);
-      collReqs.forEach(req => {
+      const reqsToRender = term ? matchedReqs : collReqs;
+      reqsToRender.forEach(req => {
         const r = document.createElement('div');
         r.className = 'coll-req-item' + (currentRequestId === req.id ? ' active' : '');
+        r.style.paddingLeft = ((level + 1) * 12 + 8) + 'px';
         r.innerHTML = `
           <span class="hist-method ${req.method.toLowerCase()}">${req.method}</span>
           <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)}</span>
           <span class="coll-req-actions" style="display:none;gap:4px">
+            <button class="coll-action-btn" data-action="note" title="${req.notes ? 'Edit notes' : 'Add notes'}">${req.notes ? '📝' : '✏️'}</button>
             <button class="coll-action-btn" data-action="dup" title="Duplicate">⧉</button>
             <button class="coll-action-btn" data-action="ren" title="Rename">✎</button>
             <button class="coll-action-btn" data-action="del" title="Delete">×</button>
           </span>
         `;
 
-        // Show/hide actions on hover
         r.addEventListener('mouseenter', () => {
           const actions = r.querySelector('.coll-req-actions');
           if (actions) actions.style.display = 'flex';
@@ -764,10 +953,22 @@
           if (e.target.closest('.coll-action-btn')) return;
           loadRequest(req);
           currentRequestId = req.id;
-          renderCollections();
+          renderCollections($('#collectionSearch').value);
         });
 
-        // Duplicate action
+        // Notes action
+        on(r.querySelector('[data-action="note"]'), 'click', async (e) => {
+          e.stopPropagation();
+          const body = document.createElement('div');
+          body.innerHTML = `<textarea id="reqNotesInput" style="width:100%;min-height:80px;padding:8px;font-size:13px;font-family:var(--font-sans);background:var(--bg-elevated);color:var(--text-primary);border:1px solid var(--border-default);border-radius:var(--radius-sm);resize:vertical;" placeholder="Add notes about this request...">${escapeHtml(req.notes || '')}</textarea>`;
+          showModal('Request Notes', body, async () => {
+            req.notes = $('#reqNotesInput').value;
+            await dbPut('requests', req);
+            await renderCollections($('#collectionSearch').value);
+            toast('Notes saved', 'success');
+          });
+        });
+
         on(r.querySelector('[data-action="dup"]'), 'click', async (e) => {
           e.stopPropagation();
           const dupReq = { ...req };
@@ -775,11 +976,10 @@
           dupReq.name = req.name + ' (copy)';
           dupReq.timestamp = Date.now();
           await dbPut('requests', dupReq);
-          await renderCollections();
+          await renderCollections($('#collectionSearch').value);
           toast('Request duplicated', 'success');
         });
 
-        // Rename action
         on(r.querySelector('[data-action="ren"]'), 'click', async (e) => {
           e.stopPropagation();
           const body = document.createElement('div');
@@ -789,18 +989,17 @@
             if (!newName) return;
             req.name = newName;
             await dbPut('requests', req);
-            await renderCollections();
+            await renderCollections($('#collectionSearch').value);
             toast('Request renamed', 'success');
           });
         });
 
-        // Delete action
         on(r.querySelector('[data-action="del"]'), 'click', async (e) => {
           e.stopPropagation();
           showModal('Delete Request', `Delete "${req.name}"?`, async () => {
             await dbDelete('requests', req.id);
             if (currentRequestId === req.id) currentRequestId = null;
-            await renderCollections();
+            await renderCollections($('#collectionSearch').value);
             toast('Request deleted', 'info');
           });
         });
@@ -808,13 +1007,34 @@
         children.appendChild(r);
       });
 
+      // Render child collections (max 2 levels)
+      if (level < 1) {
+        for (const childColl of childColls) {
+          const childRendered = renderColl(childColl, level + 1);
+          if (childRendered) {
+            children.appendChild(childRendered);
+          }
+        }
+      }
+
       on(header, 'click', () => {
         children.classList.toggle('collapsed');
       });
 
       folder.appendChild(header);
       folder.appendChild(children);
-      container.appendChild(folder);
+      return folder;
+    }
+
+    // Render root collections
+    const rootColls = byParent.get(null) || collections.filter(c => !c.parentId);
+    for (const coll of rootColls) {
+      const node = renderColl(coll, 0);
+      if (node) container.appendChild(node);
+    }
+
+    if (!hasMatch) {
+      container.innerHTML = '<div class="empty-state"><div>No matching collections or requests</div></div>';
     }
   }
 
@@ -997,9 +1217,38 @@
   async function init() {
     await openDB();
 
+    // Register service worker for PWA
+    if ('serviceWorker' in navigator) {
+      try {
+        const reg = await navigator.serviceWorker.register('sw.js');
+        console.log('SW registered:', reg.scope);
+      } catch (err) {
+        console.warn('SW registration failed:', err);
+      }
+    }
+
     initTabs('.sidebar-tab');
     initTabs('.req-tab');
     initTabs('.res-tab');
+
+    // Offline indicator
+    function updateOnlineStatus() {
+      const el = $('#onlineIndicator');
+      if (!el) return;
+      if (navigator.onLine) {
+        el.classList.remove('offline');
+        el.classList.add('online');
+        el.title = 'Online';
+      } else {
+        el.classList.remove('online');
+        el.classList.add('offline');
+        el.title = 'Offline';
+        toast('You are offline. App works without internet.', 'info');
+      }
+    }
+    on(window, 'online', updateOnlineStatus);
+    on(window, 'offline', updateOnlineStatus);
+    updateOnlineStatus();
 
     on($('#sendBtn'), 'click', sendRequest);
     on($('#saveBtn'), 'click', () => {
@@ -1062,6 +1311,11 @@
     });
 
     on($('#authType'), 'change', renderAuthFields);
+
+    // Collection search
+    on($('#collectionSearch'), 'input', () => {
+      renderCollections($('#collectionSearch').value);
+    });
 
     on($('#newCollectionBtn'), 'click', () => {
       const body = document.createElement('div');
@@ -1161,10 +1415,97 @@
       URL.revokeObjectURL(url);
     });
 
+    on($('#exportHarBtn'), 'click', () => {
+      if (!window._lastResponse) { toast('No response to export', 'error'); return; }
+      const lr = window._lastResponse;
+      const har = {
+        log: {
+          version: '1.2',
+          creator: { name: 'Ghost Client', version: '1.0' },
+          entries: [{
+            startedDateTime: new Date(Date.now() - lr.time).toISOString(),
+            time: lr.time,
+            request: {
+              method: lr.method,
+              url: lr.url,
+              headers: Object.entries(lr.reqHeaders || {}).map(([name, value]) => ({ name, value })),
+              queryString: [],
+              cookies: [],
+              headersSize: -1,
+              bodySize: lr.reqBody ? lr.reqBody.length : 0,
+              postData: lr.reqBody ? { mimeType: lr.reqHeaders['Content-Type'] || 'application/octet-stream', text: lr.reqBody } : undefined
+            },
+            response: {
+              status: lr.status,
+              statusText: lr.statusText,
+              headers: Object.entries(lr.headers || {}).map(([name, value]) => ({ name, value })),
+              cookies: [],
+              content: { size: lr.size, mimeType: lr.headers['content-type'] || 'text/plain', text: lr.text },
+              redirectURL: '',
+              headersSize: -1,
+              bodySize: lr.size
+            },
+            cache: {},
+            timings: { send: 0, wait: lr.time, receive: 0 }
+          }]
+        }
+      };
+      const blob = new Blob([JSON.stringify(har, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'ghost-client.har';
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('HAR exported', 'success');
+    });
+
     on($('#themeToggle'), 'click', () => {
       const root = document.documentElement;
       const isLight = root.getAttribute('data-theme') === 'light';
       root.setAttribute('data-theme', isLight ? 'dark' : 'light');
+    });
+
+    // Assertions UI
+    renderAssertionsList();
+    on($('#addAssertionBtn'), 'click', () => {
+      const body = document.createElement('div');
+      body.innerHTML = `
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <select id="assertType" style="padding:6px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);">
+            <option value="status">Status Code</option>
+            <option value="header">Header</option>
+            <option value="bodyContains">Body Contains</option>
+            <option value="jsonPath">JSON Path</option>
+            <option value="responseTime">Response Time (ms)</option>
+          </select>
+          <input type="text" id="assertTarget" placeholder="Target (e.g., Content-Type or json path)" style="padding:6px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);">
+          <select id="assertOperator" style="padding:6px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);">
+            <option value="equals">equals</option>
+            <option value="notEquals">not equals</option>
+            <option value="contains">contains</option>
+            <option value="notContains">not contains</option>
+            <option value="gt">greater than</option>
+            <option value="lt">less than</option>
+            <option value="exists">exists</option>
+            <option value="notExists">not exists</option>
+          </select>
+          <input type="text" id="assertExpected" placeholder="Expected value (optional for exists)" style="padding:6px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);">
+          <input type="text" id="assertDesc" placeholder="Description (optional)" style="padding:6px;font-size:13px;border:1px solid var(--border-default);border-radius:var(--radius-sm);background:var(--bg-elevated);color:var(--text-primary);">
+        </div>
+      `;
+      showModal('Add Assertion', body, () => {
+        const type = $('#assertType').value;
+        const target = $('#assertTarget').value.trim();
+        const operator = $('#assertOperator').value;
+        const expected = $('#assertExpected').value;
+        const desc = $('#assertDesc').value.trim();
+        const arr = getAssertions();
+        arr.push({ type, target, operator, expected, description: desc });
+        saveAssertions(arr);
+        renderAssertionsList();
+        toast('Assertion added', 'success');
+      });
     });
 
     on($('#settingsBtn'), 'click', () => {
@@ -1843,6 +2184,146 @@
       showModal('Generate Code', modalBody);
     });
 
+    // ===== WebSocket Client =====
+    let ws = null;
+    function wsLog(msg, type = 'info') {
+      const log = $('#wsLog');
+      const time = new Date().toLocaleTimeString();
+      const color = type === 'sent' ? 'var(--accent-indigo)' : type === 'received' ? 'var(--accent-green)' : type === 'error' ? 'var(--accent-red)' : 'var(--text-tertiary)';
+      log.innerHTML += `<div style="color:${color};border-bottom:1px solid var(--border-subtle);padding:2px 0;"><span style="color:var(--text-tertiary);">${time}</span> ${escapeHtml(msg)}</div>`;
+      log.scrollTop = log.scrollHeight;
+    }
+    on($('#wsConnectBtn'), 'click', () => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.close();
+        return;
+      }
+      const url = $('#wsUrl').value.trim();
+      if (!url) { toast('Enter a WebSocket URL', 'error'); return; }
+      try {
+        ws = new WebSocket(url);
+        $('#wsStatus').textContent = 'Connecting...';
+        $('#wsStatus').style.color = 'var(--accent-yellow)';
+        ws.onopen = () => {
+          $('#wsStatus').textContent = 'Connected';
+          $('#wsStatus').style.color = 'var(--accent-green)';
+          $('#wsConnectBtn').textContent = 'Disconnect';
+          wsLog('Connected to ' + url, 'info');
+        };
+        ws.onmessage = (e) => {
+          wsLog('← ' + (e.data.length > 200 ? e.data.slice(0, 200) + '...' : e.data), 'received');
+        };
+        ws.onerror = () => {
+          wsLog('WebSocket error', 'error');
+        };
+        ws.onclose = () => {
+          $('#wsStatus').textContent = 'Disconnected';
+          $('#wsStatus').style.color = 'var(--text-tertiary)';
+          $('#wsConnectBtn').textContent = 'Connect';
+          wsLog('Disconnected', 'info');
+          ws = null;
+        };
+      } catch (err) {
+        toast('Invalid WebSocket URL: ' + err.message, 'error');
+      }
+    });
+    on($('#wsSendBtn'), 'click', () => {
+      if (!ws || ws.readyState !== WebSocket.OPEN) { toast('Not connected', 'error'); return; }
+      const msg = $('#wsMessage').value;
+      if (!msg) return;
+      ws.send(msg);
+      wsLog('→ ' + (msg.length > 200 ? msg.slice(0, 200) + '...' : msg), 'sent');
+      $('#wsMessage').value = '';
+    });
+    on($('#wsClearBtn'), 'click', () => { $('#wsLog').innerHTML = ''; });
+
+    // ===== Server-Sent Events (SSE) =====
+    let es = null;
+    function sseLog(msg, type = 'info') {
+      const log = $('#sseLog');
+      const time = new Date().toLocaleTimeString();
+      const color = type === 'event' ? 'var(--accent-indigo)' : type === 'error' ? 'var(--accent-red)' : 'var(--text-tertiary)';
+      log.innerHTML += `<div style="color:${color};border-bottom:1px solid var(--border-subtle);padding:2px 0;"><span style="color:var(--text-tertiary);">${time}</span> ${escapeHtml(msg)}</div>`;
+      log.scrollTop = log.scrollHeight;
+    }
+    on($('#sseConnectBtn'), 'click', () => {
+      if (es) {
+        es.close();
+        es = null;
+        return;
+      }
+      const url = $('#sseUrl').value.trim();
+      if (!url) { toast('Enter an SSE endpoint URL', 'error'); return; }
+      try {
+        es = new EventSource(url);
+        $('#sseStatus').textContent = 'Connecting...';
+        $('#sseStatus').style.color = 'var(--accent-yellow)';
+        es.onopen = () => {
+          $('#sseStatus').textContent = 'Connected';
+          $('#sseStatus').style.color = 'var(--accent-green)';
+          $('#sseConnectBtn').textContent = 'Disconnect';
+          sseLog('Connected to ' + url, 'info');
+        };
+        es.onmessage = (e) => {
+          sseLog('message: ' + (e.data.length > 200 ? e.data.slice(0, 200) + '...' : e.data), 'event');
+        };
+        es.addEventListener('error', () => {
+          sseLog('SSE error or connection closed', 'error');
+          if (es && es.readyState === EventSource.CLOSED) {
+            $('#sseStatus').textContent = 'Disconnected';
+            $('#sseStatus').style.color = 'var(--text-tertiary)';
+            $('#sseConnectBtn').textContent = 'Connect';
+            es = null;
+          }
+        });
+      } catch (err) {
+        toast('Invalid SSE URL: ' + err.message, 'error');
+      }
+    });
+    on($('#sseClearBtn'), 'click', () => { $('#sseLog').innerHTML = ''; });
+
+    on($('#importHarBtn'), 'click', () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = '.har,.json';
+      input.onchange = async (ev) => {
+        const file = ev.target.files[0];
+        if (!file) return;
+        try {
+          const text = await file.text();
+          const har = JSON.parse(text);
+          if (!har.log || !Array.isArray(har.log.entries)) throw new Error('Invalid HAR file: missing entries');
+          // Create a new collection for the HAR
+          const collName = 'HAR Import ' + new Date().toLocaleDateString();
+          const collId = await dbPut('collections', { name: collName, timestamp: Date.now() });
+          let count = 0;
+          for (const entry of har.log.entries.slice(0, 100)) {
+            const req = entry.request;
+            if (!req || !req.url) continue;
+            const headers = {};
+            if (req.headers) req.headers.forEach(h => { if (h.name && h.value) headers[h.name] = h.value; });
+            const body = req.postData ? req.postData.text : null;
+            await dbPut('requests', {
+              name: req.method + ' ' + new URL(req.url).pathname,
+              method: req.method,
+              url: req.url,
+              headers,
+              body,
+              bodyType: body ? (headers['Content-Type']?.includes('json') ? 'json' : 'raw') : 'none',
+              collectionId: collId,
+              timestamp: Date.now()
+            });
+            count++;
+          }
+          await renderCollections($('#collectionSearch').value);
+          toast(`${count} requests imported from HAR`, 'success');
+        } catch (err) {
+          toast('HAR import failed: ' + err.message, 'error');
+        }
+      };
+      input.click();
+    });
+
     on($('#importCurlBtn'), 'click', () => {
       const text = $('#curlImportInput').value.trim();
       if (!text) return;
@@ -1931,6 +2412,297 @@
         $('#jsonDiffOutput').textContent = 'Invalid JSON: ' + e.message;
       }
     });
+
+    // ===== Timestamp Converter =====
+    function parseTimestamp(input) {
+      input = input.trim();
+      if (!input) return null;
+      // Try as integer (Unix seconds or ms)
+      const num = Number(input);
+      if (!isNaN(num) && input.length > 0) {
+        // Heuristic: if > 10 digits, treat as ms; else seconds
+        const ms = input.length > 10 ? num : num * 1000;
+        const d = new Date(ms);
+        if (!isNaN(d.getTime())) return d;
+      }
+      // Try ISO / natural date string
+      const d = new Date(input);
+      if (!isNaN(d.getTime())) return d;
+      return null;
+    }
+
+    function formatTimestamp(d) {
+      const pad = (n) => String(n).padStart(2, '0');
+      const iso = d.toISOString();
+      const local = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+      const unixS = Math.floor(d.getTime() / 1000);
+      const unixMs = d.getTime();
+      const relative = formatTime(d.getTime());
+      return `
+        <div class="ts-row"><span class="ts-label">Local</span><span class="ts-val">${escapeHtml(local)}</span></div>
+        <div class="ts-row"><span class="ts-label">UTC (ISO)</span><span class="ts-val">${escapeHtml(iso)}</span></div>
+        <div class="ts-row"><span class="ts-label">Unix (s)</span><span class="ts-val">${unixS}</span></div>
+        <div class="ts-row"><span class="ts-label">Unix (ms)</span><span class="ts-val">${unixMs}</span></div>
+        <div class="ts-row"><span class="ts-label">Relative</span><span class="ts-val">${escapeHtml(relative)}</span></div>
+      `;
+    }
+
+    on($('#tsInput'), 'input', () => {
+      const input = $('#tsInput').value;
+      const d = parseTimestamp(input);
+      const out = $('#tsOutput');
+      if (!d) {
+        out.style.display = 'none';
+        out.innerHTML = '';
+        return;
+      }
+      out.style.display = 'block';
+      out.innerHTML = formatTimestamp(d);
+    });
+
+    // ===== Hash Generator =====
+    async function generateHash(text, algo) {
+      if (algo === 'MD5') {
+        // MD5 not in Web Crypto; use a tiny pure-JS implementation
+        return md5(text);
+      }
+      const encoder = new TextEncoder();
+      const data = encoder.encode(text);
+      const hashBuffer = await crypto.subtle.digest(algo, data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    // Minimal MD5 implementation (public domain, ~1KB)
+    function md5(str) {
+      const rotateLeft = (lValue, iShiftBits) => (lValue << iShiftBits) | (lValue >>> (32 - iShiftBits));
+      const addUnsigned = (lX, lY) => {
+        let lX4, lY4, lX8, lY8, lResult;
+        lX8 = (lX & 0x80000000);
+        lY8 = (lY & 0x80000000);
+        lX4 = (lX & 0x40000000);
+        lY4 = (lY & 0x40000000);
+        lResult = (lX & 0x3FFFFFFF) + (lY & 0x3FFFFFFF);
+        if (lX4 & lY4) return (lResult ^ 0x80000000 ^ lX8 ^ lY8);
+        if (lX4 | lY4) {
+          if (lResult & 0x40000000) return (lResult ^ 0xC0000000 ^ lX8 ^ lY8);
+          return (lResult ^ 0x40000000 ^ lX8 ^ lY8);
+        }
+        return (lResult ^ lX8 ^ lY8);
+      };
+      const F = (x, y, z) => (x & y) | ((~x) & z);
+      const G = (x, y, z) => (x & z) | (y & (~z));
+      const H = (x, y, z) => (x ^ y ^ z);
+      const I = (x, y, z) => (y ^ (x | (~z)));
+      const _FF = (a, b, c, d, x, s, ac) => addUnsigned(rotateLeft(addUnsigned(addUnsigned(a, F(b, c, d)), x), ac), s);
+      const _GG = (a, b, c, d, x, s, ac) => addUnsigned(rotateLeft(addUnsigned(addUnsigned(a, G(b, c, d)), x), ac), s);
+      const _HH = (a, b, c, d, x, s, ac) => addUnsigned(rotateLeft(addUnsigned(addUnsigned(a, H(b, c, d)), x), ac), s);
+      const _II = (a, b, c, d, x, s, ac) => addUnsigned(rotateLeft(addUnsigned(addUnsigned(a, I(b, c, d)), x), ac), s);
+      const convertToWordArray = (str) => {
+        let lMessageLength = str.length;
+        let lNumberOfWords_temp1 = lMessageLength + 8;
+        let lNumberOfWords_temp2 = (lNumberOfWords_temp1 - (lNumberOfWords_temp1 % 64)) / 64;
+        let lNumberOfWords = (lNumberOfWords_temp2 + 1) * 16;
+        let lWordArray = new Array(lNumberOfWords - 1);
+        let lBytePosition = 0, lByteCount = 0, lWordCount;
+        while (lByteCount < lMessageLength) {
+          lWordCount = (lByteCount - (lByteCount % 4)) / 4;
+          lBytePosition = (lByteCount % 4) * 8;
+          lWordArray[lWordCount] = (lWordArray[lWordCount] | (str.charCodeAt(lByteCount) << lBytePosition));
+          lByteCount++;
+        }
+        lWordCount = (lByteCount - (lByteCount % 4)) / 4;
+        lBytePosition = (lByteCount % 4) * 8;
+        lWordArray[lWordCount] = lWordArray[lWordCount] | (0x80 << lBytePosition);
+        lWordArray[lNumberOfWords - 2] = lMessageLength << 3;
+        lWordArray[lNumberOfWords - 1] = lMessageLength >>> 29;
+        return lWordArray;
+      };
+      const wordToHex = (lValue) => {
+        let wordToHexValue = '', wordToHexValue_temp = '', lByte, lCount;
+        for (lCount = 0; lCount <= 3; lCount++) {
+          lByte = (lValue >>> (lCount * 8)) & 255;
+          wordToHexValue_temp = '0' + lByte.toString(16);
+          wordToHexValue = wordToHexValue + wordToHexValue_temp.substr(wordToHexValue_temp.length - 2, 2);
+        }
+        return wordToHexValue;
+      };
+      let x = [];
+      let k, AA, BB, CC, DD, a, b, c, d;
+      const S11 = 7, S12 = 12, S13 = 17, S14 = 22;
+      const S21 = 5, S22 = 9, S23 = 14, S24 = 20;
+      const S31 = 4, S32 = 11, S33 = 16, S34 = 23;
+      const S41 = 6, S42 = 10, S43 = 15, S44 = 21;
+      let lWordCount;
+      str = unescape(encodeURIComponent(str));
+      x = convertToWordArray(str);
+      a = 0x67452301; b = 0xEFCDAB89; c = 0x98BADCFE; d = 0x10325476;
+      for (k = 0; k < x.length; k += 16) {
+        AA = a; BB = b; CC = c; DD = d;
+        a = _FF(a, b, c, d, x[k + 0], S11, 0xD76AA478);
+        d = _FF(d, a, b, c, x[k + 1], S12, 0xE8C7B756);
+        c = _FF(c, d, a, b, x[k + 2], S13, 0x242070DB);
+        b = _FF(b, c, d, a, x[k + 3], S14, 0xC1BDCEEE);
+        a = _FF(a, b, c, d, x[k + 4], S11, 0xF57C0FAF);
+        d = _FF(d, a, b, c, x[k + 5], S12, 0x4787C62A);
+        c = _FF(c, d, a, b, x[k + 6], S13, 0xA8304613);
+        b = _FF(b, c, d, a, x[k + 7], S14, 0xFD469501);
+        a = _FF(a, b, c, d, x[k + 8], S11, 0x698098D8);
+        d = _FF(d, a, b, c, x[k + 9], S12, 0x8B44F7AF);
+        c = _FF(c, d, a, b, x[k + 10], S13, 0xFFFF5BB1);
+        b = _FF(b, c, d, a, x[k + 11], S14, 0x895CD7BE);
+        a = _FF(a, b, c, d, x[k + 12], S11, 0x6B901122);
+        d = _FF(d, a, b, c, x[k + 13], S12, 0xFD987193);
+        c = _FF(c, d, a, b, x[k + 14], S13, 0xA679438E);
+        b = _FF(b, c, d, a, x[k + 15], S14, 0x49B40821);
+        a = _GG(a, b, c, d, x[k + 1], S21, 0xF61E2562);
+        d = _GG(d, a, b, c, x[k + 6], S22, 0xC040B340);
+        c = _GG(c, d, a, b, x[k + 11], S23, 0x265E5A51);
+        b = _GG(b, c, d, a, x[k + 0], S24, 0xE9B6C7AA);
+        a = _GG(a, b, c, d, x[k + 5], S21, 0xD62F105D);
+        d = _GG(d, a, b, c, x[k + 10], S22, 0x2441453);
+        c = _GG(c, d, a, b, x[k + 15], S23, 0xD8A1E681);
+        b = _GG(b, c, d, a, x[k + 4], S24, 0xE7D3FBC8);
+        a = _GG(a, b, c, d, x[k + 9], S21, 0x21E1CDE6);
+        d = _GG(d, a, b, c, x[k + 14], S22, 0xC33707D6);
+        c = _GG(c, d, a, b, x[k + 3], S23, 0xF4D50D87);
+        b = _GG(b, c, d, a, x[k + 8], S24, 0x455A14ED);
+        a = _GG(a, b, c, d, x[k + 13], S21, 0xA9E3E905);
+        d = _GG(d, a, b, c, x[k + 2], S22, 0xFCEFA3F8);
+        c = _GG(c, d, a, b, x[k + 7], S23, 0x676F02D9);
+        b = _GG(b, c, d, a, x[k + 12], S24, 0x8D2A4C8A);
+        a = _HH(a, b, c, d, x[k + 5], S31, 0xFFFA3942);
+        d = _HH(d, a, b, c, x[k + 8], S32, 0x8771F681);
+        c = _HH(c, d, a, b, x[k + 11], S33, 0x6D9D6122);
+        b = _HH(b, c, d, a, x[k + 14], S34, 0xFDE5380C);
+        a = _HH(a, b, c, d, x[k + 1], S31, 0xA4BEEA44);
+        d = _HH(d, a, b, c, x[k + 4], S32, 0x4BDECFA9);
+        c = _HH(c, d, a, b, x[k + 7], S33, 0xF6BB4B60);
+        b = _HH(b, c, d, a, x[k + 10], S34, 0xBEBFBC70);
+        a = _HH(a, b, c, d, x[k + 13], S31, 0x289B7EC6);
+        d = _HH(d, a, b, c, x[k + 0], S32, 0xEAA127FA);
+        c = _HH(c, d, a, b, x[k + 3], S33, 0xD4EF3085);
+        b = _HH(b, c, d, a, x[k + 6], S34, 0x4881D05);
+        a = _HH(a, b, c, d, x[k + 9], S31, 0xD9D4D039);
+        d = _HH(d, a, b, c, x[k + 12], S32, 0xE6DB99E5);
+        c = _HH(c, d, a, b, x[k + 15], S33, 0x1FA27CF8);
+        b = _HH(b, c, d, a, x[k + 2], S34, 0xC4AC5665);
+        a = _II(a, b, c, d, x[k + 0], S41, 0xF4292244);
+        d = _II(d, a, b, c, x[k + 7], S42, 0x432AFF97);
+        c = _II(c, d, a, b, x[k + 14], S43, 0xAB9423A7);
+        b = _II(b, c, d, a, x[k + 5], S44, 0xFC93A039);
+        a = _II(a, b, c, d, x[k + 12], S41, 0x655B59C3);
+        d = _II(d, a, b, c, x[k + 3], S42, 0x8F0CCC92);
+        c = _II(c, d, a, b, x[k + 10], S43, 0xFFEFF47D);
+        b = _II(b, c, d, a, x[k + 1], S44, 0x85845DD1);
+        a = _II(a, b, c, d, x[k + 8], S41, 0x6FA87E4F);
+        d = _II(d, a, b, c, x[k + 15], S42, 0xFE2CE6E0);
+        c = _II(c, d, a, b, x[k + 6], S43, 0xA3014314);
+        b = _II(b, c, d, a, x[k + 13], S44, 0x4E0811A1);
+        a = _II(a, b, c, d, x[k + 4], S41, 0xF7537E82);
+        d = _II(d, a, b, c, x[k + 11], S42, 0xBD3AF235);
+        c = _II(c, d, a, b, x[k + 2], S43, 0x2AD7D2BB);
+        b = _II(b, c, d, a, x[k + 9], S44, 0xEB86D391);
+        a = addUnsigned(a, AA); b = addUnsigned(b, BB); c = addUnsigned(c, CC); d = addUnsigned(d, DD);
+      }
+      const toHex = (n) => {
+        let result = (n >>> 0).toString(16);
+        while (result.length < 8) result = '0' + result;
+        return result;
+      };
+      return toHex(a) + toHex(b) + toHex(c) + toHex(d);
+    }
+
+    on($('#hashBtn'), 'click', async () => {
+      const text = $('#hashInput').value;
+      const algo = $('#hashAlgo').value;
+      try {
+        const hash = await generateHash(text, algo);
+        $('#hashOutput').textContent = hash;
+      } catch (e) {
+        $('#hashOutput').textContent = 'Error: ' + e.message;
+      }
+    });
+
+    on($('#hashCopyBtn'), 'click', () => {
+      const text = $('#hashOutput').textContent;
+      if (!text || text.startsWith('Error')) return;
+      navigator.clipboard.writeText(text).then(() => toast('Hash copied', 'success'));
+    });
+
+    // ===== UUID Generator =====
+    function generateUUID() {
+      const rnd = new Uint8Array(16);
+      crypto.getRandomValues(rnd);
+      rnd[6] = (rnd[6] & 0x0f) | 0x40;
+      rnd[8] = (rnd[8] & 0x3f) | 0x80;
+      const hex = Array.from(rnd, b => b.toString(16).padStart(2, '0'));
+      return hex.slice(0, 4).join('') + '-' + hex.slice(4, 6).join('') + '-' + hex.slice(6, 8).join('') + '-' + hex.slice(8, 10).join('') + '-' + hex.slice(10, 16).join('');
+    }
+
+    on($('#uuidBtn'), 'click', () => {
+      const count = parseInt($('#uuidCount').value, 10) || 1;
+      const uuids = [];
+      for (let i = 0; i < count; i++) uuids.push(generateUUID());
+      $('#uuidOutput').textContent = uuids.join('\n');
+    });
+
+    // ===== Cookie Jar Tool =====
+    async function renderCookieJarList() {
+      const list = $('#cookieJarList');
+      const all = await dbGet('cookies');
+      if (!all.length) { list.innerHTML = '<div style="color:var(--text-tertiary);font-size:11px;">No cookies in jar</div>'; return; }
+      // Group by domain
+      const byDomain = {};
+      all.forEach(c => { (byDomain[c.domain] = byDomain[c.domain] || []).push(c); });
+      let html = '';
+      for (const [domain, cookies] of Object.entries(byDomain).sort()) {
+        html += `<div style="font-weight:600;font-size:11px;color:var(--text-secondary);margin-top:6px;margin-bottom:2px;">${escapeHtml(domain)}</div>`;
+        for (const c of cookies) {
+          html += `<div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;padding:2px 0;border-bottom:1px solid var(--border-subtle);">
+            <span style="color:var(--text-secondary);font-family:var(--font-mono);">${escapeHtml(c.name)}=${escapeHtml(c.value.slice(0, 30))}${c.value.length > 30 ? '...' : ''}</span>
+            <button class="coll-action-btn" onclick="this.closest('.tool-output').dataset.delId=${c.id};window._delCookieHandler&&window._delCookieHandler()" style="font-size:10px;padding:0 4px;" title="Delete">×</button>
+          </div>`;
+        }
+      }
+      list.innerHTML = html;
+    }
+
+    window._delCookieHandler = async () => {
+      const list = $('#cookieJarList');
+      const id = list.dataset.delId;
+      if (id) {
+        await deleteCookie(parseInt(id, 10));
+        delete list.dataset.delId;
+        await renderCookieJarList();
+        toast('Cookie deleted', 'info');
+      }
+    };
+
+    on($('#addCookieBtn'), 'click', async () => {
+      const domain = $('#cookieDomain').value.trim();
+      const name = $('#cookieName').value.trim();
+      const value = $('#cookieValue').value;
+      const path = $('#cookiePath').value.trim() || '/';
+      if (!domain || !name) { toast('Domain and name required', 'error'); return; }
+      await setCookie(name, value, domain, path);
+      $('#cookieName').value = '';
+      $('#cookieValue').value = '';
+      await renderCookieJarList();
+      toast('Cookie added to jar', 'success');
+    });
+
+    on($('#clearCookiesBtn'), 'click', async () => {
+      showModal('Clear Cookie Jar', 'Delete all cookies? This cannot be undone.', async () => {
+        const all = await dbGet('cookies');
+        for (const c of all) await dbDelete('cookies', c.id);
+        await renderCookieJarList();
+        toast('Cookie jar cleared', 'info');
+      });
+    });
+
+    // Initial render of cookie jar
+    renderCookieJarList();
 
     on($('#runCollectionBtn'), 'click', async () => {
       const collections = await dbGet('collections');
@@ -2168,6 +2940,86 @@
       });
     }
     return html;
+  }
+
+  // ===== Response Assertions =====
+  function getAssertions() {
+    try { return JSON.parse(localStorage.getItem('gc-assertions') || '[]'); } catch { return []; }
+  }
+  function saveAssertions(arr) {
+    localStorage.setItem('gc-assertions', JSON.stringify(arr));
+  }
+
+  function renderAssertionsList() {
+    const list = $('#assertionsList');
+    const assertions = getAssertions();
+    if (!assertions.length) { list.innerHTML = '<div style="color:var(--text-tertiary);font-size:12px;">No assertions configured. Add one to validate responses automatically.</div>'; return; }
+    list.innerHTML = assertions.map((a, i) => `
+      <div class="assertion-row">
+        <span style="color:var(--text-secondary);flex:1">${escapeHtml(a.description || a.type + ': ' + a.target)} ${escapeHtml(a.operator)} ${escapeHtml(a.expected)}</span>
+        <button class="coll-action-btn" data-del="${i}" title="Delete">×</button>
+      </div>
+    `).join('');
+    list.querySelectorAll('[data-del]').forEach(btn => {
+      on(btn, 'click', () => {
+        const arr = getAssertions();
+        arr.splice(parseInt(btn.dataset.del, 10), 1);
+        saveAssertions(arr);
+        renderAssertionsList();
+      });
+    });
+  }
+
+  function evaluateAssertion(a, status, bodyText, headers, time) {
+    try {
+      let actual;
+      switch (a.type) {
+        case 'status': actual = String(status); break;
+        case 'header': actual = headers[a.target] || ''; break;
+        case 'bodyContains': actual = bodyText; break;
+        case 'jsonPath':
+          try {
+            const data = JSON.parse(bodyText);
+            actual = a.target.split('.').reduce((o, k) => (o && o[k] !== undefined) ? o[k] : undefined, data);
+            actual = actual !== undefined ? String(actual) : '';
+          } catch { actual = ''; }
+          break;
+        case 'responseTime': actual = String(time); break;
+        default: return { pass: false, message: 'Unknown assertion type' };
+      }
+      let pass = false;
+      switch (a.operator) {
+        case 'equals': pass = actual === a.expected; break;
+        case 'notEquals': pass = actual !== a.expected; break;
+        case 'contains': pass = actual.includes(a.expected); break;
+        case 'notContains': pass = !actual.includes(a.expected); break;
+        case 'gt': pass = parseFloat(actual) > parseFloat(a.expected); break;
+        case 'lt': pass = parseFloat(actual) < parseFloat(a.expected); break;
+        case 'exists': pass = actual !== '' && actual !== undefined; break;
+        case 'notExists': pass = actual === '' || actual === undefined; break;
+      }
+      return { pass, message: pass ? 'Passed' : `Expected ${a.operator} "${a.expected}", got "${actual}"` };
+    } catch (e) {
+      return { pass: false, message: 'Error: ' + e.message };
+    }
+  }
+
+  function runAssertions(status, bodyText, headers, time) {
+    const assertions = getAssertions();
+    const resultsDiv = $('#assertionResults');
+    if (!assertions.length) { resultsDiv.innerHTML = ''; $('#testSummary').textContent = ''; return; }
+    let passCount = 0;
+    const html = assertions.map(a => {
+      const res = evaluateAssertion(a, status, bodyText, headers, time);
+      if (res.pass) passCount++;
+      const cls = res.pass ? 'assertion-pass' : 'assertion-fail';
+      const icon = res.pass ? '✓' : '✗';
+      return `<div class="assertion-result ${cls}"><span class="status-icon">${icon}</span><span style="flex:1">${escapeHtml(a.description || a.type + ': ' + a.target)} — ${escapeHtml(res.message)}</span></div>`;
+    }).join('');
+    resultsDiv.innerHTML = html;
+    const total = assertions.length;
+    $('#testSummary').textContent = `${passCount}/${total} passed`;
+    $('#testSummary').style.color = passCount === total ? 'var(--accent-green)' : 'var(--accent-red)';
   }
 
   // Keyboard shortcuts
