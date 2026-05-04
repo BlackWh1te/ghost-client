@@ -199,6 +199,8 @@
       authConfig: getAuthConfig(),
       graphqlQuery: $('#graphqlQuery').value,
       graphqlVariables: $('#graphqlVariables').value,
+      preRequestScript: $('#preRequestScript')?.value || '',
+      postResponseScript: $('#postResponseScript')?.value || '',
     };
   }
 
@@ -218,6 +220,8 @@
     $('#bodyEditor').value = tab.body || '';
     if (tab.graphqlQuery !== undefined) $('#graphqlQuery').value = tab.graphqlQuery;
     if (tab.graphqlVariables !== undefined) $('#graphqlVariables').value = tab.graphqlVariables;
+    if ($('#preRequestScript')) $('#preRequestScript').value = tab.preRequestScript || '';
+    if ($('#postResponseScript')) $('#postResponseScript').value = tab.postResponseScript || '';
     $('#authType').value = tab.authType || 'none';
     renderAuthFields();
     setAuthConfig(tab.authConfig || { type: 'none' });
@@ -338,6 +342,18 @@
     on(cancelBtn, 'click', () => { cleanup(); if (onCancel) onCancel(); });
     on($('#modalClose'), 'click', cleanup);
     on($('#modalOverlay'), 'click', (e) => { if (e.target === $('#modalOverlay')) cleanup(); });
+  }
+
+  // ===== JSON Minimap =====
+  function renderJsonMinimap(obj, depth = 0) {
+    if (depth > 5) return '<span style="opacity:0.3">…</span>';
+    if (obj === null || typeof obj !== 'object') return '<span style="font-size:2px">.</span>';
+    if (Array.isArray(obj)) {
+      if (!obj.length) return '<span style="font-size:2px">[</span>';
+      return '<div style="display:flex;gap:1px">' + obj.slice(0, 50).map(v => '<div style="width:2px;background:var(--accent-blue);opacity:' + (typeof v === 'object' && v !== null ? 0.4 : 0.8) + '"></div>').join('') + (obj.length > 50 ? '<span style="opacity:0.3">…</span>' : '') + '</div>';
+    }
+    const keys = Object.keys(obj).slice(0, 30);
+    return '<div style="display:flex;flex-direction:column;gap:1px">' + keys.map(k => '<div style="display:flex;align-items:center;gap:1px"><span style="font-size:2px;color:var(--text-tertiary)">' + escapeHtml(k.slice(0, 8)) + '</span>' + renderJsonMinimap(obj[k], depth + 1) + '</div>').join('') + (Object.keys(obj).length > 30 ? '<div style="opacity:0.3;font-size:2px">…</div>' : '') + '</div>';
   }
 
   // ===== JSON Tree Renderer =====
@@ -501,6 +517,11 @@
   }
 
   // ===== Environment Substitution =====
+  function getSelectedEnvironment() {
+    const active = envsCache.find(e => e.id === activeEnvId);
+    return active ? { ...active.vars } : {};
+  }
+
   function substituteEnv(str) {
     if (!str || !str.includes('{{')) return str;
     const active = envsCache.find(e => e.id === activeEnvId);
@@ -540,8 +561,43 @@
     const rawUrl = $('#requestUrl').value.trim();
     if (!rawUrl) { toast('Please enter a URL', 'error'); return; }
 
-    const url = substituteEnv(rawUrl);
-    const headers = getKvData($('#headersList'));
+    // --- Pre-request script ---
+    const preScript = $('#preRequestScript')?.value?.trim();
+    let scriptEnv = {};
+    if (preScript) {
+      try {
+        const pm = {
+          environment: { ...getSelectedEnvironment() },
+          variables: new Proxy({}, { get(_, k) { return pm.environment[k]; }, set(_, k, v) { pm.environment[k] = v; return true; } }),
+          set(key, val) { pm.environment[key] = val; },
+          get(key) { return pm.environment[key]; },
+        };
+        const fn = new Function('pm', 'console', preScript);
+        fn(pm, { log: (...a) => console.log('[pre]', ...a) });
+        scriptEnv = pm.environment;
+      } catch (e) {
+        toast('Pre-request script error: ' + e.message, 'error');
+        console.error(e);
+        return;
+      }
+    }
+    const subAll = (str) => {
+      if (!str) return str;
+      let out = substituteEnv(str);
+      for (const [k, v] of Object.entries(scriptEnv)) out = out.replace(new RegExp(`{{${k}}}`, 'g'), v);
+      return out;
+    };
+
+    // --- Throttle simulation ---
+    const throttle = parseInt($('#throttleSelect')?.value || '0', 10);
+    if (throttle > 0) {
+      await new Promise(r => setTimeout(r, throttle));
+    }
+
+    const url = subAll(rawUrl);
+    const rawHeaders = getKvData($('#headersList'));
+    const headers = {};
+    for (const [k, v] of Object.entries(rawHeaders)) headers[k] = subAll(v);
     const params = getKvData($('#paramsList'));
 
     // Build URL with params
@@ -555,16 +611,16 @@
     if (bodyType === 'json') {
       const rawBody = $('#bodyEditor').value.trim();
       if (rawBody) {
-        body = substituteEnv(rawBody);
+        body = subAll(rawBody);
         if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
       }
     } else if (bodyType === 'graphql') {
-      const query = substituteEnv($('#graphqlQuery').value.trim());
+      const query = subAll($('#graphqlQuery').value.trim());
       let variables = {};
       const variablesStr = $('#graphqlVariables').value.trim();
       if (variablesStr) {
         try {
-          variables = JSON.parse(substituteEnv(variablesStr));
+          variables = JSON.parse(subAll(variablesStr));
         } catch (e) {
           toast('Invalid GraphQL variables JSON', 'error');
           return;
@@ -575,34 +631,33 @@
         if (!headers['Content-Type']) headers['Content-Type'] = 'application/json';
       }
     } else if (bodyType === 'form') {
-      // For form data we'd use FormData, keeping simple for now
-      body = $('#bodyEditor').value;
+      body = subAll($('#bodyEditor').value);
     } else if (bodyType === 'text') {
-      body = $('#bodyEditor').value;
+      body = subAll($('#bodyEditor').value);
       if (body && !headers['Content-Type']) headers['Content-Type'] = 'text/plain';
     } else if (bodyType === 'raw') {
-      body = $('#bodyEditor').value;
+      body = subAll($('#bodyEditor').value);
     }
 
     // Auth
     const authType = $('#authType').value;
     if (authType === 'bearer') {
-      const token = substituteEnv($('#authBearerToken').value || '').trim();
+      const token = subAll($('#authBearerToken').value || '').trim();
       if (token) headers['Authorization'] = 'Bearer ' + token;
     } else if (authType === 'basic') {
-      const u = substituteEnv($('#authBasicUser').value || '');
-      const p = substituteEnv($('#authBasicPass').value || '');
+      const u = subAll($('#authBasicUser').value || '');
+      const p = subAll($('#authBasicPass').value || '');
       if (u) headers['Authorization'] = 'Basic ' + btoa(u + ':' + p);
     } else if (authType === 'apikey') {
-      const key = substituteEnv($('#authApiKey').value || '');
+      const key = subAll($('#authApiKey').value || '');
       const loc = $('#authApiKeyLoc').value;
-      const name = $('#authApiKeyName').value || 'X-API-Key';
+      const name = subAll($('#authApiKeyName').value || 'X-API-Key');
       if (key) {
         if (loc === 'header') headers[name] = key;
         else urlObj.searchParams.set(name, key);
       }
     } else if (authType === 'oauth2') {
-      const token = substituteEnv($('#oauthAccessToken').value || '').trim();
+      const token = subAll($('#oauthAccessToken').value || '').trim();
       if (token) headers['Authorization'] = 'Bearer ' + token;
     }
 
@@ -708,6 +763,56 @@
       }
       window._lastResponse = { text: responseText, headers: resHeaders, status: code, statusText: response.statusText, time: elapsed, size, url: finalUrl, method, reqHeaders: headers, reqBody: body };
 
+      // --- Post-response script ---
+      const postScript = $('#postResponseScript')?.value?.trim();
+      if (postScript) {
+        try {
+          const pm = {
+            environment: { ...getSelectedEnvironment() },
+            info: { code: response.status, status: response.statusText, responseTime: elapsed, responseSize: size },
+            response: {
+              json() { try { return JSON.parse(responseText); } catch { return null; } },
+              text() { return responseText; },
+              headers: resHeaders,
+              code: response.status,
+              status: response.statusText,
+              responseTime: elapsed,
+              to: { have: { status(code) { if (pm.response.code !== code) throw new Error(`Expected status ${code}, got ${pm.response.code}`); } } },
+            },
+            expect(actual) {
+              return {
+                to: {
+                  equal(expected) { if (actual !== expected) throw new Error(`Expected ${expected}, got ${actual}`); },
+                  be: { below(max) { if (actual >= max) throw new Error(`Expected below ${max}, got ${actual}`); } },
+                  have: { property(k, v) { const j = pm.response.json(); if (!j || !(k in j)) throw new Error(`Missing property ${k}`); if (v !== undefined && j[k] !== v) throw new Error(`Expected ${k}=${v}, got ${j[k]}`); } },
+                },
+              };
+            },
+            set(key, val) { pm.environment[key] = val; },
+            get(key) { return pm.environment[key]; },
+            test(name, fn) { try { fn(); console.log(`PASS: ${name}`); } catch (e) { console.error(`FAIL: ${name} — ${e.message}`); } },
+          };
+          const fn = new Function('pm', 'console', postScript);
+          fn(pm, { log: (...a) => console.log('[post]', ...a) });
+        } catch (e) {
+          toast('Post-response script error: ' + e.message, 'error');
+          console.error(e);
+        }
+      }
+
+      // --- JSON minimap ---
+      if (contentType.includes('json') && responseText.length > 2000) {
+        try {
+          const json = JSON.parse(responseText);
+          const mini = renderJsonMinimap(json);
+          const miniEl = $('#jsonMinimap');
+          if (miniEl) { miniEl.innerHTML = mini; miniEl.style.display = 'block'; }
+        } catch {}
+      } else {
+        const miniEl = $('#jsonMinimap');
+        if (miniEl) { miniEl.innerHTML = ''; miniEl.style.display = 'none'; }
+      }
+
       // Save to history
       if (localStorage.getItem('gc-auto-save') !== 'false') {
         let bodyData = null;
@@ -721,18 +826,19 @@
         }
 
         await saveHistory({
-        method,
-        url: rawUrl,
-        headers: getKvData($('#headersList')),
-        params,
-        body: bodyData,
-        bodyType,
-        authType,
-        authConfig: getAuthConfig(),
-        status: code,
-        time: elapsed,
-        timestamp: Date.now(),
-      });
+          method,
+          url: rawUrl,
+          headers: getKvData($('#headersList')),
+          params,
+          body: bodyData,
+          bodyType,
+          authType,
+          authConfig: getAuthConfig(),
+          status: code,
+          time: elapsed,
+          timestamp: Date.now(),
+        });
+      }
       await renderHistory();
 
       // Run assertions
@@ -1164,7 +1270,7 @@
     // Recursive render function
     function renderColl(coll, level = 0) {
       const collMatch = !term || coll.name.toLowerCase().includes(term);
-      const collReqs = allReqs.filter(r => r.collectionId === coll.id);
+      const collReqs = allReqs.filter(r => r.collectionId === coll.id).sort((a, b) => (a.sortOrder ?? a.timestamp ?? 0) - (b.sortOrder ?? b.timestamp ?? 0));
       const matchedReqs = term ? collReqs.filter(r => r.name.toLowerCase().includes(term) || r.method.toLowerCase().includes(term)) : collReqs;
 
       // Check children for match (to show parent if child matches)
@@ -1288,10 +1394,15 @@
         const r = document.createElement('div');
         r.className = 'coll-req-item' + (currentRequestId === req.id ? ' active' : '');
         r.style.paddingLeft = ((level + 1) * 12 + 8) + 'px';
+        r.draggable = true;
+        r.dataset.reqId = req.id;
+        r.dataset.collId = coll.id;
+        const tagsHtml = (req.tags || []).map(t => `<span class="req-tag req-tag-${escapeHtml(t)}">${escapeHtml(t)}</span>`).join('');
         r.innerHTML = `
           <span class="hist-method ${req.method.toLowerCase()}">${req.method}</span>
-          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)}</span>
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(req.name)} ${tagsHtml}</span>
           <span class="coll-req-actions" style="display:none;gap:4px">
+            <button class="coll-action-btn" data-action="tag" title="Tags">🏷</button>
             <button class="coll-action-btn" data-action="note" title="${req.notes ? 'Edit notes' : 'Add notes'}">${req.notes ? '📝' : '✏️'}</button>
             <button class="coll-action-btn" data-action="dup" title="Duplicate">⧉</button>
             <button class="coll-action-btn" data-action="ren" title="Rename">✎</button>
@@ -1326,6 +1437,59 @@
             await renderCollections($('#collectionSearch').value);
             toast('Notes saved', 'success');
           });
+        });
+
+        // Tags action
+        on(r.querySelector('[data-action="tag"]'), 'click', async (e) => {
+          e.stopPropagation();
+          const allTags = ['production', 'staging', 'dev', 'broken', 'wip'];
+          const currentTags = new Set(req.tags || []);
+          const body = document.createElement('div');
+          body.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">${allTags.map(t => `<button class="btn-small req-tag req-tag-${t} ${currentTags.has(t) ? 'active' : ''}" data-tag="${t}" style="opacity:${currentTags.has(t) ? 1 : 0.5}">${t}</button>`).join('')}</div><div style="font-size:12px;color:var(--text-secondary)">Click to toggle tags</div>`;
+          body.querySelectorAll('button[data-tag]').forEach(btn => {
+            on(btn, 'click', () => {
+              const tag = btn.dataset.tag;
+              if (currentTags.has(tag)) currentTags.delete(tag);
+              else currentTags.add(tag);
+              btn.style.opacity = currentTags.has(tag) ? '1' : '0.5';
+              btn.classList.toggle('active', currentTags.has(tag));
+            });
+          });
+          showModal('Request Tags', body, async () => {
+            req.tags = Array.from(currentTags);
+            await dbPut('requests', req);
+            await renderCollections($('#collectionSearch').value);
+            toast('Tags updated', 'success');
+          });
+        });
+
+        // Drag and drop reordering
+        on(r, 'dragstart', (e) => {
+          e.dataTransfer.setData('text/plain', req.id);
+          e.dataTransfer.effectAllowed = 'move';
+          r.classList.add('dragging');
+        });
+        on(r, 'dragend', () => r.classList.remove('dragging'));
+        on(r, 'dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          r.classList.add('drop-target');
+        });
+        on(r, 'dragleave', () => r.classList.remove('drop-target'));
+        on(r, 'drop', async (e) => {
+          e.preventDefault();
+          r.classList.remove('drop-target');
+          const draggedId = e.dataTransfer.getData('text/plain');
+          if (!draggedId || draggedId === req.id) return;
+          const draggedReq = allReqs.find(x => x.id === draggedId);
+          if (!draggedReq || draggedReq.collectionId !== coll.id) return;
+          // Swap sortOrder
+          const existingOrders = collReqs.map(x => x.sortOrder ?? 0);
+          const minOrder = Math.min(...existingOrders, 0);
+          draggedReq.sortOrder = (req.sortOrder ?? 0) - 1;
+          await dbPut('requests', draggedReq);
+          await renderCollections($('#collectionSearch').value);
+          toast('Reordered', 'success');
         });
 
         on(r.querySelector('[data-action="dup"]'), 'click', async (e) => {
@@ -2136,6 +2300,15 @@
           </div>
 
           <div style="border-top:1px solid var(--border-subtle);padding-top:16px;">
+            <label style="display:block;font-size:11px;font-weight:600;color:var(--text-tertiary);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Backup & Restore</label>
+            <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:8px;">Export all Ghost Client data as a single JSON file, or restore from a previous backup.</div>
+            <div style="display:flex;gap:8px;">
+              <button class="btn-small" id="settingsBackupBtn" style="flex:1;border-color:var(--accent-blue);color:var(--accent-blue);">Backup All Data</button>
+              <button class="btn-small" id="settingsRestoreBtn" style="flex:1;border-color:var(--accent-green);color:var(--accent-green);">Restore from File</button>
+            </div>
+          </div>
+
+          <div style="border-top:1px solid var(--border-subtle);padding-top:16px;">
             <label style="display:block;font-size:11px;font-weight:600;color:var(--accent-red);text-transform:uppercase;letter-spacing:0.4px;margin-bottom:8px">Danger Zone</label>
             <div style="display:flex;gap:8px;">
               <button class="btn-small" id="settingsClearHistory" style="flex:1;border-color:var(--accent-orange);color:var(--accent-orange);">Clear History</button>
@@ -2423,6 +2596,61 @@
           await renderNotes();
           toast('All data cleared', 'info');
         });
+      });
+
+      // Backup handler
+      on(body.querySelector('#settingsBackupBtn'), 'click', async () => {
+        const data = {
+          version: 1,
+          exportedAt: new Date().toISOString(),
+          collections: await dbGet('collections'),
+          requests: await dbGet('requests'),
+          history: await dbGet('history'),
+          environments: await dbGet('environments'),
+          notes: await dbGet('notes'),
+          cookies: await dbGet('cookies'),
+          localStorage: { assertions: localStorage.getItem('gc-assertions') },
+        };
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ghost-client-backup-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast('Backup downloaded', 'success');
+      });
+
+      // Restore handler
+      on(body.querySelector('#settingsRestoreBtn'), 'click', () => {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = async (ev) => {
+          const file = ev.target.files[0];
+          if (!file) return;
+          try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            if (!data.version) throw new Error('Invalid backup file');
+            const stores = ['collections', 'requests', 'history', 'environments', 'notes', 'cookies'];
+            for (const store of stores) {
+              if (Array.isArray(data[store])) {
+                await dbClear(store);
+                for (const item of data[store]) await dbPut(store, item);
+              }
+            }
+            if (data.localStorage?.assertions) localStorage.setItem('gc-assertions', data.localStorage.assertions);
+            await renderCollections();
+            await renderHistory();
+            await renderEnvironments();
+            await renderNotes();
+            toast('Backup restored', 'success');
+          } catch (err) {
+            toast('Restore failed: ' + err.message, 'error');
+          }
+        };
+        input.click();
       });
 
       // Vault handlers
@@ -3138,6 +3366,114 @@
       const uuids = [];
       for (let i = 0; i < count; i++) uuids.push(generateUUID());
       $('#uuidOutput').textContent = uuids.join('\n');
+    });
+
+    // ===== JSON Schema Validator =====
+    function validateJsonSchema(data, schema) {
+      const errors = [];
+      function check(value, s, path = 'root') {
+        if (s.type) {
+          const actual = Array.isArray(value) ? 'array' : value === null ? 'null' : typeof value;
+          if (s.type === 'integer') {
+            if (actual !== 'number' || !Number.isInteger(value)) errors.push(`${path}: expected integer, got ${actual}`);
+          } else if (s.type === 'number') {
+            if (actual !== 'number') errors.push(`${path}: expected number, got ${actual}`);
+          } else if (s.type === 'array') {
+            if (!Array.isArray(value)) errors.push(`${path}: expected array, got ${actual}`);
+            else if (s.items) value.forEach((v, i) => check(v, s.items, `${path}[${i}]`));
+          } else if (s.type !== actual && !(s.type === 'object' && actual === 'null')) {
+            errors.push(`${path}: expected ${s.type}, got ${actual}`);
+          }
+        }
+        if (s.type === 'object' && value && typeof value === 'object' && !Array.isArray(value) && s.properties) {
+          for (const [k, propSchema] of Object.entries(s.properties)) {
+            if (value[k] !== undefined) check(value[k], propSchema, `${path}.${k}`);
+            else if (s.required?.includes(k)) errors.push(`${path}: missing required property "${k}"`);
+          }
+        }
+        if (s.enum && !s.enum.includes(value)) errors.push(`${path}: must be one of ${JSON.stringify(s.enum)}`);
+        if (s.minLength !== undefined && String(value).length < s.minLength) errors.push(`${path}: minLength ${s.minLength}`);
+        if (s.maxLength !== undefined && String(value).length > s.maxLength) errors.push(`${path}: maxLength ${s.maxLength}`);
+        if (s.minimum !== undefined && value < s.minimum) errors.push(`${path}: minimum ${s.minimum}`);
+        if (s.maximum !== undefined && value > s.maximum) errors.push(`${path}: maximum ${s.maximum}`);
+        if (s.pattern && !new RegExp(s.pattern).test(String(value))) errors.push(`${path}: pattern ${s.pattern}`);
+      }
+      check(data, schema);
+      return errors;
+    }
+
+    on($('#validateSchemaBtn'), 'click', () => {
+      if (!window._lastResponse) { $('#schemaOutput').textContent = 'No response to validate. Send a request first.'; return; }
+      const schemaText = $('#schemaInput').value.trim();
+      if (!schemaText) { $('#schemaOutput').textContent = 'Enter a JSON Schema first.'; return; }
+      try {
+        const schema = JSON.parse(schemaText);
+        const data = JSON.parse(window._lastResponse.text);
+        const errors = validateJsonSchema(data, schema);
+        if (errors.length === 0) {
+          $('#schemaOutput').innerHTML = '<span style="color:var(--accent-green);font-weight:600;">Valid</span> — JSON conforms to schema';
+        } else {
+          $('#schemaOutput').innerHTML = '<span style="color:var(--accent-red);font-weight:600;">Invalid</span> — ' + errors.length + ' error(s):<br>' + errors.map(e => '• ' + escapeHtml(e)).join('<br>');
+        }
+      } catch (e) {
+        $('#schemaOutput').textContent = 'Parse error: ' + e.message;
+      }
+    });
+
+    // ===== Request / Response Diff =====
+    on($('#reqResDiffBtn'), 'click', () => {
+      try {
+        const a = JSON.parse($('#reqResDiffA').value || '{}');
+        const b = JSON.parse($('#reqResDiffB').value || '{}');
+        $('#reqResDiffOutput').innerHTML = renderDiff(a, b);
+      } catch (e) {
+        $('#reqResDiffOutput').textContent = 'Invalid JSON: ' + e.message;
+      }
+    });
+
+    // ===== Request Templates =====
+    const REQUEST_TEMPLATES = [
+      { name: 'REST GET', method: 'GET', url: 'https://api.example.com/items', desc: 'Standard list endpoint' },
+      { name: 'REST POST', method: 'POST', url: 'https://api.example.com/items', headers: { 'Content-Type': 'application/json' }, body: '{"name":"","value":0}', bodyType: 'json', desc: 'Create new item' },
+      { name: 'REST PUT', method: 'PUT', url: 'https://api.example.com/items/1', headers: { 'Content-Type': 'application/json' }, body: '{"name":"","value":0}', bodyType: 'json', desc: 'Full update' },
+      { name: 'REST PATCH', method: 'PATCH', url: 'https://api.example.com/items/1', headers: { 'Content-Type': 'application/json' }, body: '{"name":""}', bodyType: 'json', desc: 'Partial update' },
+      { name: 'REST DELETE', method: 'DELETE', url: 'https://api.example.com/items/1', desc: 'Delete item' },
+      { name: 'GraphQL Query', method: 'POST', url: 'https://api.example.com/graphql', headers: { 'Content-Type': 'application/json' }, bodyType: 'graphql', graphqlQuery: 'query { items { id name } }', graphqlVariables: '{}', desc: 'GraphQL fetch' },
+      { name: 'Auth Login', method: 'POST', url: 'https://api.example.com/auth/login', headers: { 'Content-Type': 'application/json' }, body: '{"username":"","password":""}', bodyType: 'json', desc: 'Login endpoint' },
+      { name: 'File Upload', method: 'POST', url: 'https://api.example.com/upload', headers: {}, bodyType: 'form', body: '', desc: 'Multipart upload' },
+    ];
+
+    on($('#templateBtn'), 'click', () => {
+      const body = document.createElement('div');
+      body.innerHTML = '<div class="template-grid">' + REQUEST_TEMPLATES.map(t => `
+        <div class="template-card" data-tmpl="${escapeHtml(t.name)}">
+          <div class="tc-method ${t.method.toLowerCase()}">${t.method}</div>
+          <div class="tc-name">${escapeHtml(t.name)}</div>
+          <div class="tc-desc">${escapeHtml(t.desc)}</div>
+        </div>
+      `).join('') + '</div>';
+      body.querySelectorAll('.template-card').forEach(card => {
+        on(card, 'click', () => {
+          const tmpl = REQUEST_TEMPLATES.find(t => t.name === card.dataset.tmpl);
+          if (!tmpl) return;
+          const current = requestTabs.find(t => t.id === activeTabId);
+          if (current) {
+            current.method = tmpl.method;
+            current.url = tmpl.url;
+            current.headers = tmpl.headers || {};
+            current.bodyType = tmpl.bodyType || 'none';
+            current.body = tmpl.body || '';
+            current.graphqlQuery = tmpl.graphqlQuery || '';
+            current.graphqlVariables = tmpl.graphqlVariables || '{}';
+            saveTabs();
+            applyTabState(current);
+            renderRequestTabs();
+            toast('Template loaded: ' + tmpl.name, 'success');
+          }
+          $('#modalOverlay').classList.remove('open');
+        });
+      });
+      showModal('Request Templates', body);
     });
 
     // ===== Cookie Jar Tool =====

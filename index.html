@@ -219,6 +219,21 @@
               </div>
               <div id="uuidOutput" class="tool-output"></div>
             </div>
+            <div class="tool-group">
+              <label class="tool-label">JSON Schema Validator</label>
+              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px;">Validate response JSON against a schema</div>
+              <textarea id="schemaInput" class="tool-textarea" placeholder='{"type":"object","properties":{"id":{"type":"number"}}}' style="min-height:80px;"></textarea>
+              <button class="btn-small" id="validateSchemaBtn" style="width:100%;margin-top:4px">Validate Last Response</button>
+              <div id="schemaOutput" class="tool-output"></div>
+            </div>
+            <div class="tool-group">
+              <label class="tool-label">Request / Response Diff</label>
+              <div style="font-size:11px;color:var(--text-tertiary);margin-bottom:6px;">Compare two JSON responses side-by-side</div>
+              <textarea id="reqResDiffA" class="tool-textarea" placeholder="First JSON response..."></textarea>
+              <textarea id="reqResDiffB" class="tool-textarea" placeholder="Second JSON response..."></textarea>
+              <button class="btn-small" id="reqResDiffBtn" style="width:100%;margin-top:4px">Compare</button>
+              <div id="reqResDiffOutput" class="tool-output"></div>
+            </div>
           </div>
         </div>
       </aside>
@@ -247,11 +262,18 @@
               <input type="number" id="timeoutInput" class="timeout-input" value="30" min="1" max="300" title="Timeout (seconds)">
               <span class="timeout-label">s</span>
             </div>
+            <select id="throttleSelect" class="throttle-select" title="Simulate network speed">
+              <option value="0">No throttle</option>
+              <option value="1000">Slow 3G (1s)</option>
+              <option value="500">Fast 3G (500ms)</option>
+              <option value="200">Slow 4G (200ms)</option>
+            </select>
             <button class="btn-primary" id="sendBtn">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
               Send
             </button>
             <button class="btn-secondary" id="saveBtn">Save</button>
+            <button class="btn-secondary" id="templateBtn" title="Request templates">📋</button>
             <button class="btn-secondary" id="genCodeBtn" title="Generate code">&lt;/&gt;</button>
           </div>
 
@@ -260,6 +282,7 @@
             <button class="req-tab" data-tab="headers">Headers</button>
             <button class="req-tab" data-tab="body">Body</button>
             <button class="req-tab" data-tab="auth">Auth</button>
+            <button class="req-tab" data-tab="scripts">Scripts</button>
           </div>
 
           <div class="request-panel active" id="req-params">
@@ -320,6 +343,20 @@
             </select>
             <div class="auth-fields" id="authFields"></div>
           </div>
+
+          <div class="request-panel" id="req-scripts">
+            <div class="script-section">
+              <label class="script-label">Pre-request Script <span style="color:var(--text-tertiary);font-weight:400">(runs before sending)</span></label>
+              <textarea id="preRequestScript" class="script-editor" placeholder="// Variables available: pm.request, pm.environment&#10;// Example: pm.environment.set('timestamp', Date.now());" spellcheck="false"></textarea>
+            </div>
+            <div class="script-section">
+              <label class="script-label">Post-response Script <span style="color:var(--text-tertiary);font-weight:400">(runs after receiving)</span></label>
+              <textarea id="postResponseScript" class="script-editor" placeholder="// Variables available: pm.response, pm.environment&#10;// Example: pm.environment.set('token', pm.response.json().token);" spellcheck="false"></textarea>
+            </div>
+            <div style="padding:8px 12px;font-size:11px;color:var(--text-tertiary);">
+              API: <code>pm.environment.set(key, value)</code>, <code>pm.environment.get(key)</code>, <code>pm.response.json()</code>, <code>pm.response.status</code>
+            </div>
+          </div>
         </section>
 
         <!-- Divider -->
@@ -364,7 +401,10 @@
                 <option value="regex">Regex</option>
               </select>
             </div>
-            <pre id="responseBody" class="response-body"><code class="language-json">// Send a request to see the response</code></pre>
+            <div class="response-body-wrap">
+              <pre id="responseBody" class="response-body"><code class="language-json">// Send a request to see the response</code></pre>
+              <div id="jsonMinimap" class="json-minimap" style="display:none;"></div>
+            </div>
           </div>
 
           <div class="response-panel" id="res-headers">

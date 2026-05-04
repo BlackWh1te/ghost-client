@@ -213,14 +213,22 @@ Your data is yours. Your tools should be too.
 - [x] Multiple request tabs with persistence
 - [x] Secure note storage
 - [x] Data Vault — AES-256-GCM local encryption
+- [x] Response schema validation (JSON Schema)
+- [x] Request/response diff side-by-side
+- [x] Request templates / snippets (8 built-in)
+- [x] Custom pre/post request scripts (pm.environment, pm.response, pm.expect API)
+- [x] Bandwidth / latency simulation (Slow 3G / Fast 3G / Slow 4G)
+- [x] JSON minimap for large responses
+- [x] Drag-and-drop reordering in collections
+- [x] Request tags (production, staging, dev, broken, wip)
+- [x] Backup & restore all data (one-click JSON export/import)
 
 ### pending
 
-- [ ] Response schema validation (JSON Schema)
-- [ ] Request/response diff side-by-side
-- [ ] Request templates/snippets
-- [ ] Custom pre/post request scripts
-- [ ] Bandwidth / latency simulation
+- [ ] Bulk operations / batch API calls
+- [ ] Mock responses for offline testing
+- [ ] Undo/redo for request builder
+- [ ] Response interceptors
 
 Want something else? Open an issue. But remember: the answer to "can it do cloud sync?" is **no**. Forever.
 

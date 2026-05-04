@@ -39,23 +39,23 @@ This document tracks shipped and pending features. Last updated: 2025-05-04.
 ## Pending
 
 ### Request/Response
-- [ ] Response schema validation (JSON Schema)
-- [ ] Request/response diff side-by-side
-- [ ] Request templates/snippets
+- [x] Response schema validation (JSON Schema)
+- [x] Request/response diff side-by-side
+- [x] Request templates/snippets (8 built-in: REST GET/POST/PUT/PATCH/DELETE, GraphQL, Auth Login, File Upload)
 - [ ] Bulk operations / batch API calls
 - [ ] Mock responses for offline testing
 
 ### Developer Experience
-- [ ] Custom pre/post request scripts (like Postman)
-- [ ] Bandwidth / latency simulation
-- [ ] Mini-map for large JSON responses
-- [ ] Drag-and-drop reordering in collections
+- [x] Custom pre/post request scripts (pm.environment, pm.response, pm.expect API)
+- [x] Bandwidth / latency simulation (No throttle / Slow 3G / Fast 3G / Slow 4G)
+- [x] Mini-map for large JSON responses (2px font sidebar overview)
+- [x] Drag-and-drop reordering in collections
 - [ ] Undo/redo for request builder
 
 ### Data Management
 - [ ] Import/export with nested folder structure
-- [ ] Backup/restore all data (one-click)
-- [ ] Tagging requests (production, staging, broken)
+- [x] Backup/restore all data (one-click JSON export/import)
+- [x] Tagging requests (production, staging, dev, broken, wip)
 
 ### Advanced
 - [ ] Response interceptors
